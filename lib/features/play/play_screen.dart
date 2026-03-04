@@ -13,6 +13,7 @@ import '../../game/model/game_state.dart';
 import '../../game/persistence/save_model.dart';
 import '../../game/solvable/solvable_seed_usage_tracker.dart';
 import '../../game/solvable/solvable_solution_step.dart';
+import '../../game/solvable/solution_step_replayer.dart';
 import '../../game/solvable/solvable_solutions_1suit_verified.dart';
 import 'widgets/tableau_column_view.dart';
 
@@ -198,27 +199,12 @@ class _PlayScreenState extends State<PlayScreen> {
 
   bool _applySolutionStep(SolutionStepDto step, {required GameEngine engine}) {
     final before = _stateFingerprint(engine.state);
-
-    bool applied;
-    if (step.isDeal) {
-      applied = engine.dealFromStock();
-    } else {
-      if (!step.isMove ||
-          step.fromColumn == null ||
-          step.toColumn == null ||
-          step.startIndex == null) {
-        return false;
-      }
-      applied = engine.moveStack(
-        step.fromColumn!,
-        step.startIndex!,
-        step.toColumn!,
-      );
-    }
-
-    if (!applied) {
+    final result = applyStrictSolutionStep(state: engine.state, step: step);
+    if (!result.applied) {
       return false;
     }
+
+    engine.restoreState(result.nextState);
 
     if (step.isMove) {
       final after = _stateFingerprint(engine.state);
@@ -291,7 +277,11 @@ class _PlayScreenState extends State<PlayScreen> {
     }
 
     final previewEngine = GameEngine();
-    previewEngine.restoreState(_engine.state);
+    // Keep preview semantics identical to generated solutions: replay from dealt start.
+    previewEngine.newGame(
+      difficulty: _engine.state.difficulty,
+      dealSource: RandomDealSource(_engine.state.seed),
+    );
 
     setState(() {
       _solutionPreviewActive = true;

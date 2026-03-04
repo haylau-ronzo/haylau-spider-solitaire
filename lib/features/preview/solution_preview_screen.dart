@@ -8,6 +8,7 @@ import '../../game/engine/game_engine.dart';
 import '../../game/model/card.dart';
 import '../../game/model/deal_source.dart';
 import '../../game/solvable/solvable_solution_step.dart';
+import '../../game/solvable/solution_step_replayer.dart';
 import '../play/widgets/tableau_column_view.dart';
 import 'deal_choice.dart';
 
@@ -43,6 +44,7 @@ class _SolutionPreviewScreenState extends State<SolutionPreviewScreen> {
   int _stepIndex = 0;
   String _stepDescription = '';
   SolutionStepKind? _currentStepKind;
+  String? _lastApplyFailureReason;
   Completer<void>? _runWaiter;
 
   Duration get _stepDelay => widget.args.fast
@@ -206,47 +208,7 @@ class _SolutionPreviewScreenState extends State<SolutionPreviewScreen> {
   }
 
   String _explainInvalidStep(SolutionStepDto step) {
-    if (step.isDeal) {
-      return _engine.state.stock.cards.length < 10
-          ? 'stock has fewer than 10 cards'
-          : 'deal rejected by engine';
-    }
-
-    if (!step.isMove ||
-        step.fromColumn == null ||
-        step.toColumn == null ||
-        step.startIndex == null) {
-      return 'invalid move dto';
-    }
-
-    final from = step.fromColumn!;
-    final to = step.toColumn!;
-    final start = step.startIndex!;
-    final state = _engine.state;
-    if (from < 0 || from >= state.tableau.columns.length) {
-      return 'from column out of range: $from';
-    }
-    if (to < 0 || to >= state.tableau.columns.length) {
-      return 'to column out of range: $to';
-    }
-
-    final run = _engine.getEffectiveMoveRun(from, start);
-    if (run == null) {
-      return 'no legal run at from=$from start=$start';
-    }
-
-    if (step.movedLength != null && run.length != step.movedLength) {
-      return 'movedLength mismatch expected=${step.movedLength} actual=${run.length}';
-    }
-
-    final source = state.tableau.columns[from];
-    final firstCard = source[run.effectiveStartIndex];
-    final drop = _engine.canDropRun(to, firstCard);
-    if (!drop.isValid) {
-      return 'drop invalid from=$from to=$to start=$start: ${drop.reason ?? 'unknown'}';
-    }
-
-    return 'engine rejected move from=$from to=$to start=$start';
+    return _lastApplyFailureReason ?? 'step rejected';
   }
 
   String _stateFingerprint() {
@@ -266,46 +228,23 @@ class _SolutionPreviewScreenState extends State<SolutionPreviewScreen> {
 
   bool _applyStep(SolutionStepDto step) {
     final before = _stateFingerprint();
-
-    bool applied;
-    if (step.isDeal) {
-      // Keep semantics identical to the live gameplay Deal button.
-      applied = _engine.dealFromStock();
-      if (applied) {
-        _debugLogDealState();
-      }
-    } else {
-      if (!step.isMove ||
-          step.fromColumn == null ||
-          step.toColumn == null ||
-          step.startIndex == null) {
-        return false;
-      }
-
-      if (step.movedLength != null) {
-        final run = _engine.getEffectiveMoveRun(
-          step.fromColumn!,
-          step.startIndex!,
-        );
-        if (run == null || run.length != step.movedLength) {
-          return false;
-        }
-      }
-
-      applied = _engine.moveStack(
-        step.fromColumn!,
-        step.startIndex!,
-        step.toColumn!,
-      );
+    final result = applyStrictSolutionStep(state: _engine.state, step: step);
+    if (!result.applied) {
+      _lastApplyFailureReason = result.reason;
+      return false;
     }
 
-    if (!applied) {
-      return false;
+    _engine.restoreState(result.nextState);
+    _lastApplyFailureReason = null;
+
+    if (step.isDeal) {
+      _debugLogDealState();
     }
 
     if (step.isMove) {
       final after = _stateFingerprint();
       if (before == after) {
+        _lastApplyFailureReason = 'move produced no state change';
         return false;
       }
     }

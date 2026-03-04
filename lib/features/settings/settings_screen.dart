@@ -4,6 +4,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../app/app_services.dart';
+import '../../app/routes.dart';
 import '../../game/model/difficulty.dart';
 import '../../game/solvable/solvable_seed_counts_summary.dart';
 import '../../game/solvable/verified_solvable_data_override.dart';
@@ -305,6 +306,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
                 trailing: const Icon(Icons.chevron_right),
                 onTap: () => _showSolvableSeedCounts(settings),
+              ),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Help / Info'),
+                subtitle: const Text('Rules, privacy, version, and licenses.'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => Navigator.of(context).pushNamed(AppRoutes.help),
+              ),
+              const Padding(
+                padding: EdgeInsets.only(top: 8),
+                child: Text(
+                  'Most deals may be solvable, but only Guaranteed deals are verified by our solver.',
+                  style: TextStyle(fontSize: 12, color: Colors.black54),
+                ),
               ),
             ],
           );

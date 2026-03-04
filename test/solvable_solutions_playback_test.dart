@@ -2,22 +2,20 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:haylau_spider_solitaire/game/engine/game_engine.dart';
 import 'package:haylau_spider_solitaire/game/model/deal_source.dart';
 import 'package:haylau_spider_solitaire/game/model/difficulty.dart';
+import 'package:haylau_spider_solitaire/game/solvable/solvable_seeds.dart';
 import 'package:haylau_spider_solitaire/game/solvable/solvable_solution_step.dart';
 import 'package:haylau_spider_solitaire/game/solvable/solvable_solutions_1suit_verified.dart';
+import 'package:haylau_spider_solitaire/game/solvable/solution_step_replayer.dart';
 import 'package:haylau_spider_solitaire/game/solvable/verified_solvable_data_override.dart';
 
 void main() {
   bool applyStep(GameEngine engine, SolutionStepDto step) {
-    if (step.isDeal) {
-      return engine.dealFromStock();
-    }
-    if (!step.isMove ||
-        step.fromColumn == null ||
-        step.toColumn == null ||
-        step.startIndex == null) {
+    final result = applyStrictSolutionStep(state: engine.state, step: step);
+    if (!result.applied) {
       return false;
     }
-    return engine.moveStack(step.fromColumn!, step.startIndex!, step.toColumn!);
+    engine.restoreState(result.nextState);
+    return true;
   }
 
   test('ignore-verified override hides solution maps at read API', () {
@@ -49,6 +47,28 @@ void main() {
     expect(engine.state.foundations.completedRuns, greaterThanOrEqualTo(0));
   });
 
+  test('every verified prefix replays via strict shared path (seed + step)', () {
+    for (final entry in solutionFirst30_1Suit.entries) {
+      final engine = GameEngine();
+      engine.newGame(
+        difficulty: Difficulty.oneSuit,
+        dealSource: RandomDealSource(entry.key),
+      );
+
+      for (var i = 0; i < entry.value.length; i++) {
+        final step = entry.value[i];
+        final result = applyStrictSolutionStep(state: engine.state, step: step);
+        expect(
+          result.applied,
+          isTrue,
+          reason:
+              'seed=${entry.key} step=${i + 1} kind=${step.kind.name} reason=${result.reason}',
+        );
+        engine.restoreState(result.nextState);
+      }
+    }
+  });
+
   test(
     'every 30-step prefix has at most five deal steps and includes a move',
     () {
@@ -75,6 +95,53 @@ void main() {
     },
   );
 
+  test(
+    'every verified one-suit seed has a strict full-solution proof that wins',
+    () {
+      final verifiedSeeds = winnableSeedsForDifficulty(Difficulty.oneSuit);
+
+      for (final seed in verifiedSeeds) {
+        final full = solutionFull_1Suit[seed];
+        expect(
+          full,
+          isNotNull,
+          reason: 'verified seed $seed is missing full proof steps',
+        );
+        expect(
+          full,
+          isNotEmpty,
+          reason: 'verified seed $seed has empty full proof steps',
+        );
+
+        final engine = GameEngine();
+        engine.newGame(
+          difficulty: Difficulty.oneSuit,
+          dealSource: RandomDealSource(seed),
+        );
+
+        for (var i = 0; i < full!.length; i++) {
+          final step = full[i];
+          final result = applyStrictSolutionStep(
+            state: engine.state,
+            step: step,
+          );
+          expect(
+            result.applied,
+            isTrue,
+            reason:
+                'full proof failed seed=$seed step=${i + 1} kind=${step.kind.name} reason=${result.reason}',
+          );
+          engine.restoreState(result.nextState);
+        }
+
+        expect(
+          engine.isWon,
+          isTrue,
+          reason: 'full proof did not win for seed=$seed',
+        );
+      }
+    },
+  );
   test('seed 9 full solution reaches win when fixture is present', () {
     final steps = solutionFull_1Suit[9];
     if (steps == null || steps.isEmpty) {
@@ -164,7 +231,7 @@ void main() {
     expect(steps[5].isDeal, isFalse);
   });
 
-  test('seed 2 first six steps replay with legal move at step 6', () {
+  test('seed 2 first six steps replay with strict shared path', () {
     final steps = solutionFirst30_1Suit[2];
     if (steps == null || steps.length < 6) {
       expect(true, isTrue);
@@ -177,38 +244,16 @@ void main() {
       dealSource: const RandomDealSource(2),
     );
 
-    for (var i = 0; i < 5; i++) {
-      expect(steps[i].isDeal, isTrue, reason: 'step ${i + 1} should be DEAL');
-      expect(engine.dealFromStock(), isTrue);
+    for (var i = 0; i < 6; i++) {
+      final step = steps[i];
+      final result = applyStrictSolutionStep(state: engine.state, step: step);
+      expect(
+        result.applied,
+        isTrue,
+        reason:
+            'seed=2 step=${i + 1} kind=${step.kind.name} reason=${result.reason}',
+      );
+      engine.restoreState(result.nextState);
     }
-
-    final move = steps[5];
-    expect(move.kind, SolutionStepKind.move);
-    expect(move.fromColumn, isNotNull);
-    expect(move.toColumn, isNotNull);
-    expect(move.startIndex, isNotNull);
-
-    final run = engine.getEffectiveMoveRun(move.fromColumn!, move.startIndex!);
-    expect(run, isNotNull);
-
-    if (move.movedLength != null) {
-      expect(run!.length, move.movedLength);
-    }
-
-    final firstCard = engine
-        .state
-        .tableau
-        .columns[move.fromColumn!][run!.effectiveStartIndex];
-    final drop = engine.canDropRun(move.toColumn!, firstCard);
-    expect(
-      drop.isValid,
-      isTrue,
-      reason: 'expected legal drop for step 6, got: ${drop.reason}',
-    );
-
-    expect(
-      engine.moveStack(move.fromColumn!, move.startIndex!, move.toColumn!),
-      isTrue,
-    );
   });
 }

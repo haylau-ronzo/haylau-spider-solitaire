@@ -2,6 +2,7 @@ import '../actions/auto_complete_run_action.dart';
 import '../actions/deal_from_stock_action.dart';
 import '../actions/game_action.dart';
 import '../actions/move_stack_action.dart';
+import '../engine_core/spider_engine_core.dart';
 import '../model/card.dart';
 import '../model/deal_source.dart';
 import '../model/difficulty.dart';
@@ -72,10 +73,11 @@ class GameEngine {
     required DealSource dealSource,
   }) {
     final seed = dealSource.toSeed(difficulty: difficulty);
-    _state = _buildInitialState(
+    _state = SpiderEngineCore.buildInitialState(
       seed: seed,
       difficulty: difficulty,
       dealSource: dealSource,
+      startedAt: _clock.now(),
     );
     _undoStack.clear();
     _redoStack.clear();
@@ -85,10 +87,11 @@ class GameEngine {
 
   void restartSameDeal() {
     final nextRestarts = _state.restartsUsed + 1;
-    _state = _buildInitialState(
+    _state = SpiderEngineCore.buildInitialState(
       seed: _state.seed,
       difficulty: _state.difficulty,
       dealSource: _state.dealSource,
+      startedAt: _clock.now(),
     ).copyWith(restartsUsed: nextRestarts);
     _undoStack.clear();
     _redoStack.clear();
@@ -255,13 +258,10 @@ class GameEngine {
   }
 
   bool isStockDealAvailable({required bool unrestrictedDealRule}) {
-    if (_state.stock.cards.length < 10) {
-      return false;
-    }
-    if (unrestrictedDealRule) {
-      return true;
-    }
-    return _state.tableau.columns.every((column) => column.isNotEmpty);
+    return SpiderEngineCore.canDealFromStock(
+      _state,
+      unrestrictedDealRule: unrestrictedDealRule,
+    );
   }
 
   bool hasAnyValidMoves({required bool unrestrictedDealRule}) {
@@ -863,47 +863,6 @@ class GameEngine {
     _statsRepo.save(current.copyWith(totalHints: current.totalHints + 1));
   }
 
-  GameState _buildInitialState({
-    required int seed,
-    required Difficulty difficulty,
-    required DealSource dealSource,
-  }) {
-    final deck = _buildDeckForDifficulty(difficulty);
-    final shuffled = _shuffleDeterministic(deck, seed);
-
-    final columns = List<List<PlayingCard>>.generate(
-      10,
-      (_) => <PlayingCard>[],
-    );
-    var cursor = 0;
-    for (var col = 0; col < 10; col++) {
-      final count = col < 4 ? 6 : 5;
-      for (var i = 0; i < count; i++) {
-        final isTop = i == count - 1;
-        columns[col].add(shuffled[cursor++].copyWith(faceUp: isTop));
-      }
-    }
-
-    final stock = shuffled
-        .sublist(cursor)
-        .map((c) => c.copyWith(faceUp: false))
-        .toList();
-    return GameState(
-      tableau: TableauPiles(columns),
-      stock: StockPile(stock),
-      foundations: const Foundations(completedRuns: 0),
-      difficulty: difficulty,
-      dealSource: dealSource,
-      seed: seed,
-      startedAt: _clock.now(),
-      moves: 0,
-      hintsUsed: 0,
-      undosUsed: 0,
-      redosUsed: 0,
-      restartsUsed: 0,
-    );
-  }
-
   _DevMetrics _buildDevMetrics(Difficulty difficulty, int seed) {
     switch (difficulty) {
       case Difficulty.oneSuit:
@@ -946,56 +905,10 @@ class GameEngine {
     return min + (state % (span + 1));
   }
 
-  static List<PlayingCard> _buildDeckForDifficulty(Difficulty difficulty) {
-    final allSuits = CardSuit.values;
-    final allRanks = CardRank.values;
-    final deck = <PlayingCard>[];
-    var id = 0;
-
-    for (var i = 0; i < 8; i++) {
-      for (final rank in allRanks) {
-        CardSuit suit;
-        switch (difficulty) {
-          case Difficulty.oneSuit:
-            suit = CardSuit.spades;
-          case Difficulty.twoSuit:
-            suit = i.isEven ? CardSuit.spades : CardSuit.hearts;
-          case Difficulty.fourSuit:
-            suit = allSuits[i % allSuits.length];
-        }
-        deck.add(PlayingCard(id: id++, rank: rank, suit: suit, faceUp: false));
-      }
-    }
-    return deck;
-  }
-
-  static List<PlayingCard> _shuffleDeterministic(
-    List<PlayingCard> deck,
-    int seed,
-  ) {
-    final result = List<PlayingCard>.of(deck);
-    var state = seed & 0x7fffffff;
-
-    int nextInt(int maxExclusive) {
-      state = (1103515245 * state + 12345) & 0x7fffffff;
-      return state % maxExclusive;
-    }
-
-    for (var i = result.length - 1; i > 0; i--) {
-      final j = nextInt(i + 1);
-      final temp = result[i];
-      result[i] = result[j];
-      result[j] = temp;
-    }
-
-    return result;
-  }
-
   static List<PlayingCard> buildDeckForTest(Difficulty difficulty) =>
-      _buildDeckForDifficulty(difficulty);
-
+      SpiderEngineCore.buildDeckForDifficulty(difficulty);
   static List<PlayingCard> shuffleForTest(List<PlayingCard> deck, int seed) =>
-      _shuffleDeterministic(deck, seed);
+      SpiderEngineCore.shuffleDeterministic(deck, seed);
 }
 
 class MovableRunHint {

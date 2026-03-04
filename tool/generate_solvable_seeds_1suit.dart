@@ -1,17 +1,12 @@
 import 'dart:io';
 import 'dart:math';
 
-import 'package:haylau_spider_solitaire/game/actions/auto_complete_run_action.dart';
-import 'package:haylau_spider_solitaire/game/actions/deal_from_stock_action.dart';
-import 'package:haylau_spider_solitaire/game/actions/move_stack_action.dart';
-import 'package:haylau_spider_solitaire/game/engine/game_engine.dart';
 import 'package:haylau_spider_solitaire/game/engine/move_validator.dart';
-import 'package:haylau_spider_solitaire/game/model/card.dart';
-import 'package:haylau_spider_solitaire/game/model/deal_source.dart';
+import 'package:haylau_spider_solitaire/game/engine_core/spider_engine_core.dart';
 import 'package:haylau_spider_solitaire/game/model/difficulty.dart';
 import 'package:haylau_spider_solitaire/game/model/game_state.dart';
-import 'package:haylau_spider_solitaire/game/model/piles.dart';
 import 'package:haylau_spider_solitaire/game/solvable/solvable_solution_step.dart';
+import 'package:haylau_spider_solitaire/game/solvable/solution_step_replayer.dart';
 
 void main(List<String> args) {
   if (_GeneratorConfig.wantsHelp(args)) {
@@ -452,11 +447,15 @@ class _OneSuitSeedSolver {
       }
 
       if (_canDealFromStockClassic(state)) {
-        final dealt = const DealFromStockAction().apply(state);
-        if (identical(dealt, state)) {
+        final dealt = SpiderEngineCore.tryDealFromStock(
+          state,
+          unrestrictedDealRule: false,
+          validator: _validator,
+        );
+        if (dealt == null) {
           break;
         }
-        state = _normalizeAfterAction(dealt);
+        state = dealt;
         path.add(const SolutionStepDto.deal());
         continue;
       }
@@ -502,11 +501,15 @@ class _OneSuitSeedSolver {
         }
 
         if (_canDealFromStockClassic(state)) {
-          final dealt = const DealFromStockAction().apply(state);
-          if (identical(dealt, state)) {
+          final dealt = SpiderEngineCore.tryDealFromStock(
+            state,
+            unrestrictedDealRule: false,
+            validator: _validator,
+          );
+          if (dealt == null) {
             break;
           }
-          state = _normalizeAfterAction(dealt);
+          state = dealt;
           path.add(const SolutionStepDto.deal());
           continue;
         }
@@ -628,41 +631,10 @@ class _OneSuitSeedSolver {
   }
 
   GameState _initialStateForSeed(int seed) {
-    final deck = _buildOneSuitDeck();
-    final shuffled = _shuffleDeterministic(deck, seed);
-
-    final columns = List<List<PlayingCard>>.generate(
-      10,
-      (_) => <PlayingCard>[],
-    );
-    var cursor = 0;
-
-    for (var col = 0; col < 10; col++) {
-      final count = col < 4 ? 6 : 5;
-      for (var i = 0; i < count; i++) {
-        final isTop = i == count - 1;
-        columns[col].add(shuffled[cursor++].copyWith(faceUp: isTop));
-      }
-    }
-
-    final stock = shuffled
-        .sublist(cursor)
-        .map((card) => card.copyWith(faceUp: false))
-        .toList();
-
-    return GameState(
-      tableau: TableauPiles(columns),
-      stock: StockPile(stock),
-      foundations: const Foundations(completedRuns: 0),
-      difficulty: Difficulty.oneSuit,
-      dealSource: RandomDealSource(seed),
+    return SpiderEngineCore.buildInitialState(
       seed: seed,
+      difficulty: Difficulty.oneSuit,
       startedAt: DateTime.fromMillisecondsSinceEpoch(0),
-      moves: 0,
-      hintsUsed: 0,
-      undosUsed: 0,
-      redosUsed: 0,
-      restartsUsed: 0,
     );
   }
 
@@ -671,13 +643,14 @@ class _OneSuitSeedSolver {
     results.addAll(_expandMovesWithSteps(state));
 
     if (_canDealFromStockClassic(state)) {
-      final dealt = const DealFromStockAction().apply(state);
-      if (!identical(dealt, state)) {
+      final dealt = SpiderEngineCore.tryDealFromStock(
+        state,
+        unrestrictedDealRule: false,
+        validator: _validator,
+      );
+      if (dealt != null) {
         results.add(
-          _Transition(
-            state: _normalizeAfterAction(dealt),
-            step: const SolutionStepDto.deal(),
-          ),
+          _Transition(state: dealt, step: const SolutionStepDto.deal()),
         );
       }
     }
@@ -705,12 +678,6 @@ class _OneSuitSeedSolver {
           continue;
         }
 
-        final movedCards = source.sublist(startIndex, startIndex + run.length);
-        final exposesFaceDownTop =
-            startIndex > 0 &&
-            source[startIndex - 1].faceUp == false &&
-            startIndex + run.length == source.length;
-
         for (
           var toColumn = 0;
           toColumn < state.tableau.columns.length;
@@ -720,33 +687,25 @@ class _OneSuitSeedSolver {
             continue;
           }
 
-          if (!_validator
-              .canDropRun(state, toColumn, movedCards.first)
-              .isValid) {
-            continue;
-          }
-
-          final action = MoveStackAction(
+          final move = SpiderEngineCore.tryMoveStack(
+            state,
             fromColumn: fromColumn,
-            toColumn: toColumn,
             startIndex: startIndex,
-            movedCards: movedCards,
-            flippedSourceCardOnApply: exposesFaceDownTop,
+            toColumn: toColumn,
+            validator: _validator,
           );
-
-          final next = action.apply(state);
-          if (identical(next, state)) {
+          if (!move.didMove) {
             continue;
           }
 
           results.add(
             _Transition(
-              state: _normalizeAfterAction(next),
+              state: move.state,
               step: SolutionStepDto.move(
                 fromColumn: fromColumn,
                 toColumn: toColumn,
                 startIndex: startIndex,
-                movedLength: run.length,
+                movedLength: move.movedLength,
               ),
             ),
           );
@@ -757,50 +716,11 @@ class _OneSuitSeedSolver {
     return results;
   }
 
-  GameState _normalizeAfterAction(GameState state) {
-    var current = state;
-    var changed = true;
-
-    while (changed) {
-      changed = false;
-      for (var column = 0; column < current.tableau.columns.length; column++) {
-        final startIndex = _validator.detectCompleteRunAtEnd(current, column);
-        if (startIndex == null) {
-          continue;
-        }
-
-        final removedCards = current.tableau.columns[column].sublist(
-          startIndex,
-        );
-        final source = current.tableau.columns[column];
-        final flipsExposedCard =
-            startIndex > 0 &&
-            source[startIndex - 1].faceUp == false &&
-            startIndex + removedCards.length == source.length;
-
-        final action = AutoCompleteRunAction(
-          columnIndex: column,
-          startIndex: startIndex,
-          removedCards: removedCards,
-          flippedExposedCardOnApply: flipsExposedCard,
-        );
-
-        final next = action.apply(current);
-        if (!identical(next, current)) {
-          current = next;
-          changed = true;
-        }
-      }
-    }
-
-    return current;
-  }
-
   bool _canDealFromStockClassic(GameState state) {
-    if (state.stock.cards.length < 10) {
-      return false;
-    }
-    return state.tableau.columns.every((column) => column.isNotEmpty);
+    return SpiderEngineCore.canDealFromStock(
+      state,
+      unrestrictedDealRule: false,
+    );
   }
 
   bool _isWon(GameState state) => state.foundations.completedRuns >= 8;
@@ -848,45 +768,6 @@ class _OneSuitSeedSolver {
 
     return sb.toString();
   }
-
-  List<PlayingCard> _buildOneSuitDeck() {
-    final allRanks = CardRank.values;
-    final deck = <PlayingCard>[];
-    var id = 0;
-
-    for (var i = 0; i < 8; i++) {
-      for (final rank in allRanks) {
-        deck.add(
-          PlayingCard(
-            id: id++,
-            rank: rank,
-            suit: CardSuit.spades,
-            faceUp: false,
-          ),
-        );
-      }
-    }
-    return deck;
-  }
-
-  List<PlayingCard> _shuffleDeterministic(List<PlayingCard> deck, int seed) {
-    final result = List<PlayingCard>.of(deck);
-    var state = seed & 0x7fffffff;
-
-    int nextInt(int maxExclusive) {
-      state = (1103515245 * state + 12345) & 0x7fffffff;
-      return state % maxExclusive;
-    }
-
-    for (var i = result.length - 1; i > 0; i--) {
-      final j = nextInt(i + 1);
-      final temp = result[i];
-      result[i] = result[j];
-      result[j] = temp;
-    }
-
-    return result;
-  }
 }
 
 class _Node {
@@ -908,64 +789,9 @@ String? _replayValidationError({
   required Difficulty difficulty,
   required List<SolutionStepDto> steps,
 }) {
-  final engine = GameEngine();
-  engine.newGame(difficulty: difficulty, dealSource: RandomDealSource(seed));
-
-  for (var i = 0; i < steps.length; i++) {
-    final step = steps[i];
-
-    if (step.isDeal) {
-      if (!engine.dealFromStock()) {
-        return 'step ${i + 1}: dealFromStock rejected';
-      }
-      continue;
-    }
-
-    if (!step.isMove ||
-        step.fromColumn == null ||
-        step.toColumn == null ||
-        step.startIndex == null) {
-      return 'step ${i + 1}: invalid move dto';
-    }
-
-    if (step.movedLength != null) {
-      final run = engine.getEffectiveMoveRun(
-        step.fromColumn!,
-        step.startIndex!,
-      );
-      if (run == null) {
-        return 'step ${i + 1}: no legal run at from=${step.fromColumn} '
-            'start=${step.startIndex}';
-      }
-      if (run.length != step.movedLength) {
-        return 'step ${i + 1}: movedLength mismatch expected=${step.movedLength} '
-            'actual=${run.length}';
-      }
-    }
-
-    final moved = engine.moveStack(
-      step.fromColumn!,
-      step.startIndex!,
-      step.toColumn!,
-    );
-    if (!moved) {
-      final run = engine.getEffectiveMoveRun(
-        step.fromColumn!,
-        step.startIndex!,
-      );
-      var dropReason = 'run invalid';
-      if (run != null) {
-        final firstCard = engine
-            .state
-            .tableau
-            .columns[step.fromColumn!][run.effectiveStartIndex];
-        dropReason =
-            engine.canDropRun(step.toColumn!, firstCard).reason ?? 'unknown';
-      }
-      return 'step ${i + 1}: moveStack rejected from=${step.fromColumn} '
-          'to=${step.toColumn} start=${step.startIndex} reason=$dropReason';
-    }
-  }
-
-  return null;
+  return strictReplayValidationError(
+    seed: seed,
+    difficulty: difficulty,
+    steps: steps,
+  );
 }
