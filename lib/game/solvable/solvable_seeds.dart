@@ -109,6 +109,29 @@ int pickSolvableSeed({required Difficulty difficulty, required int index}) {
   return pickRandomSolvableSeed(difficulty: difficulty, index: index);
 }
 
+int pickGuaranteedRandomPoolIndexPreferUnused({
+  required List<int> pool,
+  required Set<int> usedSeeds,
+  required int nextIndex,
+}) {
+  if (pool.isEmpty) {
+    return 0;
+  }
+
+  final normalizedNext = nextIndex < 0 ? 0 : nextIndex;
+  var selected = normalizedNext % pool.length;
+
+  for (var offset = 0; offset < pool.length; offset++) {
+    final candidate = (normalizedNext + offset) % pool.length;
+    if (!usedSeeds.contains(pool[candidate])) {
+      selected = candidate;
+      break;
+    }
+  }
+
+  return selected;
+}
+
 DailySolvableSeedPool? _pickPoolForDate({
   required String dateKey,
   required List<DailySolvableSeedPool> pools,

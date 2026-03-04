@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../app/app_services.dart';
@@ -8,6 +9,7 @@ import '../../game/persistence/save_model.dart';
 import '../../game/persistence/save_repo.dart';
 import '../../game/persistence/save_slots.dart';
 import '../../game/solvable/solvable_seeds.dart';
+import '../../game/solvable/solvable_seed_usage_tracker.dart';
 import '../../game/solvable/solvable_solution_step.dart';
 import '../../game/solvable/solvable_solutions_1suit_verified.dart';
 import '../../game/solvable/verified_solvable_data_override.dart';
@@ -167,15 +169,11 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     final used = _usedSeedsForDifficulty(_difficulty);
-    var selected = _nextGuaranteedRandomIndex % seeds.length;
-
-    for (var offset = 0; offset < seeds.length; offset++) {
-      final candidate = (_nextGuaranteedRandomIndex + offset) % seeds.length;
-      if (!used.contains(seeds[candidate])) {
-        selected = candidate;
-        break;
-      }
-    }
+    final selected = pickGuaranteedRandomPoolIndexPreferUnused(
+      pool: seeds,
+      usedSeeds: used,
+      nextIndex: _nextGuaranteedRandomIndex,
+    );
 
     if (advance) {
       _nextGuaranteedRandomIndex = (selected + 1) % seeds.length;
@@ -205,11 +203,16 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _startRandomGuaranteed() async {
     final index = _selectGuaranteedRandomIndex(advance: true);
+    final dealSource = RandomSolvableDealSource(index);
+    final seed = dealSource.toSeed(difficulty: _difficulty);
+    await recordStartedSolvableSeedUsage(
+      dealSource: dealSource,
+      difficulty: _difficulty,
+      seed: seed,
+      repo: AppServices.solvableSeedUsageRepo,
+    );
     await _openPlay(
-      PlayScreenArgs(
-        difficulty: _difficulty,
-        dealSource: RandomSolvableDealSource(index),
-      ),
+      PlayScreenArgs(difficulty: _difficulty, dealSource: dealSource),
     );
   }
 
@@ -522,6 +525,21 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  Widget _buildDevPoolDebugLine() {
+    if (!kDebugMode) {
+      return const SizedBox.shrink();
+    }
+
+    final poolSize = winnableSeedsForDifficulty(_difficulty).length;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Text(
+        'DEV difficulty=${_difficulty.label} pool=$poolSize ignoreVerified=$ignoreVerifiedSolvableData',
+        style: Theme.of(context).textTheme.bodySmall,
+      ),
+    );
+  }
+
   Widget _menuItem({
     required String title,
     required String subtitle,
@@ -692,24 +710,32 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           Padding(
             padding: const EdgeInsets.all(16),
-            child: isPortrait
-                ? ListView.separated(
-                    itemCount: items.length,
-                    separatorBuilder: (_, _) => const SizedBox(height: 12),
-                    itemBuilder: (context, index) =>
-                        SizedBox(height: 108, child: items[index]),
-                  )
-                : GridView.builder(
-                    itemCount: items.length,
-                    gridDelegate:
-                        const SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: 2,
-                          crossAxisSpacing: 10,
-                          mainAxisSpacing: 10,
-                          childAspectRatio: 3.4,
+            child: Column(
+              children: [
+                _buildDevPoolDebugLine(),
+                Expanded(
+                  child: isPortrait
+                      ? ListView.separated(
+                          itemCount: items.length,
+                          separatorBuilder: (_, _) =>
+                              const SizedBox(height: 12),
+                          itemBuilder: (context, index) =>
+                              SizedBox(height: 108, child: items[index]),
+                        )
+                      : GridView.builder(
+                          itemCount: items.length,
+                          gridDelegate:
+                              const SliverGridDelegateWithFixedCrossAxisCount(
+                                crossAxisCount: 2,
+                                crossAxisSpacing: 10,
+                                mainAxisSpacing: 10,
+                                childAspectRatio: 3.4,
+                              ),
+                          itemBuilder: (context, index) => items[index],
                         ),
-                    itemBuilder: (context, index) => items[index],
-                  ),
+                ),
+              ],
+            ),
           ),
         ],
       ),

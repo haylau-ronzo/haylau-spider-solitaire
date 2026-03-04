@@ -12,6 +12,7 @@ import '../../game/persistence/save_model.dart';
 import '../../game/persistence/save_repo.dart';
 import '../../game/persistence/save_slots.dart';
 import '../../game/solvable/solvable_seeds.dart';
+import '../../game/solvable/solvable_seed_usage_tracker.dart';
 import '../../game/solvable/solvable_solution_step.dart';
 import '../../game/solvable/solvable_solutions_1suit_verified.dart';
 import '../../utils/date_formatters.dart';
@@ -262,11 +263,17 @@ class _DailyCalendarScreenState extends State<DailyCalendarScreen> {
     }
 
     if (action == 'play' || action == 'replay') {
+      final difficulty = _settingsRepo.current().difficulty;
+      final dealSource = DailySolvableDealSource(dateKey);
+      final seed = dealSource.toSeed(difficulty: difficulty);
+      await recordStartedSolvableSeedUsage(
+        dealSource: dealSource,
+        difficulty: difficulty,
+        seed: seed,
+        repo: AppServices.solvableSeedUsageRepo,
+      );
       await _openPlay(
-        PlayScreenArgs(
-          difficulty: _settingsRepo.current().difficulty,
-          dealSource: DailySolvableDealSource(dateKey),
-        ),
+        PlayScreenArgs(difficulty: difficulty, dealSource: dealSource),
       );
       return;
     }

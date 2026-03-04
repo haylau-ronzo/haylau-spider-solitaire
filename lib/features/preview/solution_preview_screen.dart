@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
@@ -41,6 +42,7 @@ class _SolutionPreviewScreenState extends State<SolutionPreviewScreen> {
   int _pendingSingleSteps = 0;
   int _stepIndex = 0;
   String _stepDescription = '';
+  bool? _currentStepIsDeal;
   Completer<void>? _runWaiter;
 
   Duration get _stepDelay => widget.args.fast
@@ -107,6 +109,46 @@ class _SolutionPreviewScreenState extends State<SolutionPreviewScreen> {
         ? ''
         : ' len ${step.movedLength}';
     return 'Move ${step.fromColumn}->${step.toColumn}$lengthLabel';
+  }
+
+  String _explainInvalidStep(SolutionStepDto step) {
+    if (step.isDeal) {
+      return _engine.state.stock.cards.length < 10
+          ? 'stock has fewer than 10 cards'
+          : 'deal rejected by engine';
+    }
+
+    if (!step.isMove ||
+        step.fromColumn == null ||
+        step.toColumn == null ||
+        step.startIndex == null) {
+      return 'invalid move dto';
+    }
+
+    final from = step.fromColumn!;
+    final to = step.toColumn!;
+    final start = step.startIndex!;
+    final state = _engine.state;
+    if (from < 0 || from >= state.tableau.columns.length) {
+      return 'from column out of range: ';
+    }
+    if (to < 0 || to >= state.tableau.columns.length) {
+      return 'to column out of range: ';
+    }
+
+    final run = _engine.getEffectiveMoveRun(from, start);
+    if (run == null) {
+      return 'no legal run at from= start=';
+    }
+
+    final source = state.tableau.columns[from];
+    final firstCard = source[run.effectiveStartIndex];
+    final drop = _engine.canDropRun(to, firstCard);
+    if (!drop.isValid) {
+      return 'drop invalid from= to= start=';
+    }
+
+    return 'engine rejected move from= to= start=';
   }
 
   String _stateFingerprint() {
@@ -184,10 +226,18 @@ class _SolutionPreviewScreenState extends State<SolutionPreviewScreen> {
       final description = _describeSolutionStep(step);
       final ok = _applyStep(step);
       if (!ok) {
+        final reason = _explainInvalidStep(step);
+        if (kDebugMode) {
+          debugPrint(
+            'Solution preview invalid step ${i + 1}: $description :: $reason',
+          );
+        }
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('Preview stopped at step ${i + 1}: $description'),
+              content: Text(
+                'Preview stopped at step ${i + 1}: $description ($reason)',
+              ),
             ),
           );
         }
@@ -200,6 +250,7 @@ class _SolutionPreviewScreenState extends State<SolutionPreviewScreen> {
       setState(() {
         _stepIndex = i + 1;
         _stepDescription = description;
+        _currentStepIsDeal = step.isDeal;
       });
 
       await SchedulerBinding.instance.endOfFrame;
@@ -311,6 +362,13 @@ class _SolutionPreviewScreenState extends State<SolutionPreviewScreen> {
                           : _stepDescription,
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
+                    if (kDebugMode) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        'DEV stepType: ${_currentStepIsDeal == null ? 'n/a' : (_currentStepIsDeal! ? 'deal' : 'move')}',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ],
                     const SizedBox(height: 8),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,

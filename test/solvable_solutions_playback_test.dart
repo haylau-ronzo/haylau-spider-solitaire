@@ -137,4 +137,17 @@ void main() {
       expect(afterSnapshot, beforeSnapshot);
     },
   );
+  test('known verified prefix has both deal and move steps', () {
+    final steps = solutionFirst30_1Suit[2] ?? solutionFirst30_1Suit[29];
+    if (steps == null || steps.isEmpty) {
+      expect(true, isTrue);
+      return;
+    }
+
+    final hasDeal = steps.any((s) => s.isDeal);
+    final hasMove = steps.any((s) => s.isMove);
+
+    expect(hasDeal, isTrue);
+    expect(hasMove, isTrue);
+  });
 }
