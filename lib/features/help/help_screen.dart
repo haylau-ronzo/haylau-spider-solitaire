@@ -1,25 +1,60 @@
 import 'package:flutter/material.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
-class HelpScreen extends StatelessWidget {
+class HelpScreen extends StatefulWidget {
   const HelpScreen({super.key});
+
+  @override
+  State<HelpScreen> createState() => _HelpScreenState();
+}
+
+class _HelpScreenState extends State<HelpScreen> {
+  PackageInfo? _packageInfo;
+
+  String get versionText => _packageInfo == null
+      ? 'Unknown'
+      : '${_packageInfo!.version}+${_packageInfo!.buildNumber}';
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPackageInfo();
+  }
+
+  Future<void> _loadPackageInfo() async {
+    try {
+      final info = await PackageInfo.fromPlatform();
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _packageInfo = info;
+      });
+    } catch (_) {
+      // Best-effort only; keep screen usable when package info is unavailable.
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final headingStyle = Theme.of(context).textTheme.titleMedium;
     final bodyStyle = Theme.of(context).textTheme.bodyMedium;
+    final mutedStyle = Theme.of(
+      context,
+    ).textTheme.bodySmall?.copyWith(color: Colors.black54);
 
-    Widget section(String title, List<String> bullets) {
+    Widget section({required String title, required List<String> paragraphs}) {
       return Padding(
-        padding: const EdgeInsets.only(bottom: 14),
+        padding: const EdgeInsets.only(bottom: 18),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(title, style: headingStyle),
             const SizedBox(height: 6),
-            for (final bullet in bullets)
+            for (final p in paragraphs)
               Padding(
-                padding: const EdgeInsets.only(bottom: 4),
-                child: Text('- $bullet', style: bodyStyle),
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Text(p, style: bodyStyle),
               ),
           ],
         ),
@@ -27,47 +62,70 @@ class HelpScreen extends StatelessWidget {
     }
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Help / How to Play')),
+      appBar: AppBar(title: const Text('Help / Info / FAQ')),
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              section('How to play Spider', [
-                'Goal: clear all cards by building complete K→A sequences (same-suit); completed sequences are removed.',
-                'Moves: build descending runs. In 2/4 suit, only same-suit decending runs move as a stack; otherwise move a single card.',
-                'Dropping: place onto a card one rank higher, or onto an empty column.',
-                'Stock: deals a new row of 10 cards.',
-              ]),
-              section('Deal rules (Settings)', [
-                'Classic deal rule: you can only deal from stock when all 10 columns have at least one card.',
-                'Unrestricted deal: allows dealing even with empty columns.',
-              ]),
-              section('Controls', [
-                'Drag and drop: drag a movable card/run to a valid destination column.',
-                'Tap mode Off: drag only.',
-                'Tap mode On (two-tap): tap to select, then tap destination column to move.',
-                'Tap mode Auto: tap to auto-move to the best available destination.',
-                'Undo / Redo: step backward or forward through moves.',
-                'Hint: quick check before dealing; highlights likely progress moves (not perfect).',
-              ]),
-              section('Daily calendar', [
-                'Future days are locked.',
-                'Blue dot = In progress.',
-                'Red dot = Complete.',
-                'Double red dots = Completed on day.',
-                'Daily deals use curated solvable seeds.',
-              ]),
-              section('Scoring', [
-                'Score is based on time and moves, with penalties for undos and hints.',
-                'Time and moves are shown during play; final score is shown on the results screen.',
-              ]),
-              section('Privacy / Offline', [
-                'App works offline.',
-                'No ads.',
-                'Online features (sync/leaderboards) are optional and may be added later.',
-              ]),
+              section(
+                title: 'About The Game',
+                paragraphs: const [
+                  'Spider Solitaire with 1-suit, 2-suit, and 4-suit difficulty modes.',
+                  '1-suit is the most accessible, 2-suit is medium, and 4-suit is the classic hardest mode.',
+                ],
+              ),
+              section(
+                title: 'How To Play',
+                paragraphs: const [
+                  'Build descending runs in the tableau (K down to A).',
+                  'Complete full same-suit sequences to remove them to foundations.',
+                  'Deal a new stock row when you need more moves.',
+                ],
+              ),
+              section(
+                title: 'Daily And Guaranteed Deals',
+                paragraphs: const [
+                  'Guaranteed deals are solver-verified solvable under STRICT rules.',
+                  'The verified pool is generated offline with time limits, so it grows gradually.',
+                ],
+              ),
+              section(
+                title: 'Strict Rules And User Options',
+                paragraphs: const [
+                  'Verification always uses strict canonical rules and is not affected by your settings.',
+                  'If you enable relaxed gameplay options (for example unrestricted stock deal behavior), that affects your play session but not solver verification.',
+                ],
+              ),
+              section(
+                title: 'Privacy And Data',
+                paragraphs: const [
+                  'No account. No personal data collected. Gameplay data stored locally on your device.',
+                  'This app uses local storage for saves, settings, stats, and solvable-seed usage tracking.',
+                  'No analytics or crash-reporting SDKs are integrated in this build.',
+                ],
+              ),
+              section(
+                title: 'App Version',
+                paragraphs: ['Version / Build: $versionText'],
+              ),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Open Licenses'),
+                subtitle: Text(
+                  'View open-source licenses used by this app.',
+                  style: mutedStyle,
+                ),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () {
+                  showLicensePage(
+                    context: context,
+                    applicationName: 'Haylau Spider Solitaire',
+                    applicationVersion: versionText,
+                  );
+                },
+              ),
             ],
           ),
         ),
