@@ -5,14 +5,19 @@ import 'package:flutter/material.dart';
 import '../../app/app_services.dart';
 import '../../app/routes.dart';
 import '../../game/model/deal_source.dart';
+import '../../game/model/difficulty.dart';
 import '../../game/persistence/daily_deals_model.dart';
 import '../../game/persistence/daily_deals_repo.dart';
 import '../../game/persistence/save_model.dart';
 import '../../game/persistence/save_repo.dart';
 import '../../game/persistence/save_slots.dart';
 import '../../game/solvable/solvable_seeds.dart';
+import '../../game/solvable/solvable_solution_step.dart';
+import '../../game/solvable/solvable_solutions_1suit_verified.dart';
 import '../../utils/date_formatters.dart';
 import '../play/play_screen.dart';
+import '../preview/deal_choice.dart';
+import '../preview/solution_preview_screen.dart';
 import '../settings/settings_repo.dart';
 import 'daily_calendar_logic.dart';
 
@@ -140,6 +145,51 @@ class _DailyCalendarScreenState extends State<DailyCalendarScreen> {
     await _load();
   }
 
+  List<SolutionStepDto>? _prefixForSeed(int seed) {
+    if (_settingsRepo.current().difficulty != Difficulty.oneSuit) {
+      return null;
+    }
+    return verifiedSolutionPrefixForSeed1Suit(seed);
+  }
+
+  List<SolutionStepDto>? _fullForSeed(int seed) {
+    if (_settingsRepo.current().difficulty != Difficulty.oneSuit) {
+      return null;
+    }
+    return verifiedFullSolutionForSeed1Suit(seed);
+  }
+
+  Future<void> _openPreviewForDate({
+    required String dateKey,
+    required bool fast,
+  }) {
+    final difficulty = _settingsRepo.current().difficulty;
+    final seed = pickDailySolvableSeed(
+      difficulty: difficulty,
+      dateKey: dateKey,
+    );
+    final steps = fast ? _fullForSeed(seed) : _prefixForSeed(seed);
+    if (steps == null || steps.isEmpty) {
+      return Future<void>.value();
+    }
+
+    return Navigator.of(context).pushNamed(
+      AppRoutes.solutionPreview,
+      arguments: SolutionPreviewArgs(
+        deal: DealChoice(
+          difficulty: difficulty,
+          mode: DealChoiceMode.daily,
+          guaranteed: true,
+          seed: seed,
+          dateKey: dateKey,
+        ),
+        steps: steps,
+        title: fast ? 'Show Full Proof (Fast)' : 'Preview First 30 Steps',
+        fast: fast,
+      ),
+    );
+  }
+
   void _queueDateTap(DateTime date) {
     if (!_dailyAvailable) {
       if (mounted) {
@@ -211,36 +261,49 @@ class _DailyCalendarScreenState extends State<DailyCalendarScreen> {
       return;
     }
 
-    switch (action) {
-      case 'play':
-      case 'replay':
-        await _openPlay(
-          PlayScreenArgs(
-            difficulty: _settingsRepo.current().difficulty,
-            dealSource: DailySolvableDealSource(dateKey),
-          ),
-        );
-      case 'resume':
-        final save = state.inProgressSave;
-        if (save == null) {
-          return;
-        }
-        await _openPlay(
-          PlayScreenArgs(
-            difficulty: save.gameState.difficulty,
-            dealSource: save.gameState.dealSource,
-            resumeSave: save,
-          ),
-        );
-      case 'abort':
-        await _saveRepo.deleteSlot(SaveSlots.daily(dateKey));
-        await _dailyDealsRepo.markAbortedIfNotCompleted(dateKey);
-        if (!mounted) {
-          return;
-        }
-        await _load();
-      case 'close':
-        break;
+    if (action == 'play' || action == 'replay') {
+      await _openPlay(
+        PlayScreenArgs(
+          difficulty: _settingsRepo.current().difficulty,
+          dealSource: DailySolvableDealSource(dateKey),
+        ),
+      );
+      return;
+    }
+
+    if (action == 'resume') {
+      final save = state.inProgressSave;
+      if (save == null) {
+        return;
+      }
+      await _openPlay(
+        PlayScreenArgs(
+          difficulty: save.gameState.difficulty,
+          dealSource: save.gameState.dealSource,
+          resumeSave: save,
+        ),
+      );
+      return;
+    }
+
+    if (action == 'abort') {
+      await _saveRepo.deleteSlot(SaveSlots.daily(dateKey));
+      await _dailyDealsRepo.markAbortedIfNotCompleted(dateKey);
+      if (!mounted) {
+        return;
+      }
+      await _load();
+      return;
+    }
+
+    if (action == 'preview') {
+      await _openPreviewForDate(dateKey: dateKey, fast: false);
+      return;
+    }
+
+    if (action == 'full-proof') {
+      await _openPreviewForDate(dateKey: dateKey, fast: true);
+      return;
     }
   }
 
@@ -249,6 +312,15 @@ class _DailyCalendarScreenState extends State<DailyCalendarScreen> {
     final completion = state.completionRecord?.metrics;
     final completedAt = state.completionRecord?.completedAt;
     final lastPlayedAt = state.inProgressSave?.savedAt;
+    final dateKey = toDateKeyLocal(date);
+    final seed = pickDailySolvableSeed(
+      difficulty: _settingsRepo.current().difficulty,
+      dateKey: dateKey,
+    );
+    final prefix = _prefixForSeed(seed);
+    final full = _fullForSeed(seed);
+    final canPreview = prefix != null && prefix.isNotEmpty;
+    final canShowFull = full != null && full.isNotEmpty;
 
     final details = <MapEntry<String, String>>[];
     if (state.isCompleted && completion != null) {
@@ -296,6 +368,11 @@ class _DailyCalendarScreenState extends State<DailyCalendarScreen> {
                           ),
                           const SizedBox(height: 2),
                           Text(statusLine),
+                          const SizedBox(height: 2),
+                          Text(
+                            'Seed: ',
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
                           const SizedBox(height: 8),
                           for (final item in details)
                             Padding(
@@ -346,6 +423,18 @@ class _DailyCalendarScreenState extends State<DailyCalendarScreen> {
                           onPressed: () => Navigator.of(context).pop('play'),
                           child: const Text('Play'),
                         ),
+                      FilledButton.tonal(
+                        onPressed: canPreview
+                            ? () => Navigator.of(context).pop('preview')
+                            : null,
+                        child: const Text('Preview first 30 steps'),
+                      ),
+                      FilledButton.tonal(
+                        onPressed: canShowFull
+                            ? () => Navigator.of(context).pop('full-proof')
+                            : null,
+                        child: const Text('Show full proof (fast)'),
+                      ),
                     ],
                   ),
                 ],

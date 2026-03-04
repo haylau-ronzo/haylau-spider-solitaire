@@ -40,7 +40,15 @@ class PlayScreen extends StatefulWidget {
 class _PlayScreenState extends State<PlayScreen> {
   late final GameEngine _engine;
   Timer? _ticker;
+  Timer? _hintClearTimer;
   int? _selectedColumn;
+  int? _selectedStartIndex;
+  int? _selectedLength;
+  DragRunPayload? _activeDragPayload;
+  final Map<int, List<HintFlashRun>> _hintRunsByColumn =
+      <int, List<HintFlashRun>>{};
+  bool _hintFlashOn = false;
+  Set<int> _hintTargetColumns = <int>{};
   bool _solvableUsageRecorded = false;
 
   bool _solutionPreviewActive = false;
@@ -84,6 +92,7 @@ class _PlayScreenState extends State<PlayScreen> {
   @override
   void dispose() {
     _ticker?.cancel();
+    _hintClearTimer?.cancel();
     _solutionPreviewWaiter?.complete();
     super.dispose();
   }
@@ -235,6 +244,7 @@ class _PlayScreenState extends State<PlayScreen> {
     return verifiedSolutionPrefixForSeed1Suit(_engine.state.seed);
   }
 
+  // ignore: unused_element
   Future<void> _showSolutionSheet() async {
     if (_solutionPreviewActive) {
       return;
@@ -293,6 +303,10 @@ class _PlayScreenState extends State<PlayScreen> {
       _solutionPreviewStepDescription = '';
       _solutionPreviewEngine = previewEngine;
       _selectedColumn = null;
+      _selectedStartIndex = null;
+      _selectedLength = null;
+      _activeDragPayload = null;
+      _clearHintData();
     });
 
     for (var i = 0; i < steps.length; i++) {
@@ -388,6 +402,173 @@ class _PlayScreenState extends State<PlayScreen> {
     messenger.showSnackBar(SnackBar(content: Text(message)));
   }
 
+  void _clearHintData() {
+    _hintClearTimer?.cancel();
+    _hintRunsByColumn.clear();
+    _hintTargetColumns = <int>{};
+    _hintFlashOn = false;
+  }
+
+  void _clearSelection() {
+    _selectedColumn = null;
+    _selectedStartIndex = null;
+    _selectedLength = null;
+  }
+
+  void _resetInteractionState() {
+    _clearSelection();
+    _activeDragPayload = null;
+    _clearHintData();
+  }
+
+  _SelectedRunInfo? _selectedRunInfo(GameState state) {
+    final fromColumn = _selectedColumn;
+    final startIndex = _selectedStartIndex;
+    if (fromColumn == null || startIndex == null) {
+      return null;
+    }
+
+    if (fromColumn < 0 || fromColumn >= state.tableau.columns.length) {
+      return null;
+    }
+
+    final column = state.tableau.columns[fromColumn];
+    if (column.isEmpty || startIndex < 0 || startIndex >= column.length) {
+      return null;
+    }
+
+    final run = _engine.getEffectiveMoveRun(fromColumn, startIndex);
+    if (run == null || run.effectiveStartIndex != startIndex) {
+      return null;
+    }
+
+    if (run.effectiveStartIndex + run.length > column.length) {
+      return null;
+    }
+
+    return _SelectedRunInfo(
+      fromColumn: fromColumn,
+      startIndex: run.effectiveStartIndex,
+      length: run.length,
+      firstCard: column[run.effectiveStartIndex],
+    );
+  }
+
+  int? _pickBestAutoDestination(int fromColumn, PlayingCard runFirstCard) {
+    final state = _engine.state;
+    final targets = _engine
+        .getLegalDropTargets(runFirstCard)
+        .where((target) => target != fromColumn)
+        .toList();
+    if (targets.isEmpty) {
+      return null;
+    }
+
+    targets.sort((a, b) {
+      final aColumn = state.tableau.columns[a];
+      final bColumn = state.tableau.columns[b];
+      final aEmpty = aColumn.isEmpty ? 1 : 0;
+      final bEmpty = bColumn.isEmpty ? 1 : 0;
+      if (aEmpty != bEmpty) {
+        return aEmpty - bEmpty;
+      }
+      if (aColumn.isNotEmpty && bColumn.isNotEmpty) {
+        final rankCompare = bColumn.last.rank.index - aColumn.last.rank.index;
+        if (rankCompare != 0) {
+          return rankCompare;
+        }
+      }
+      return a - b;
+    });
+
+    return targets.first;
+  }
+
+  bool _isDropTargetHighlighted(int column, GameState state) {
+    if (_hintTargetColumns.contains(column)) {
+      return true;
+    }
+
+    final selected = _selectedRunInfo(state);
+    if (selected != null &&
+        column != selected.fromColumn &&
+        _engine.canDropRun(column, selected.firstCard).isValid) {
+      return true;
+    }
+
+    final drag = _activeDragPayload;
+    if (drag != null &&
+        drag.cards.isNotEmpty &&
+        column != drag.fromColumn &&
+        _engine.canDropRun(column, drag.cards.first).isValid) {
+      return true;
+    }
+
+    return false;
+  }
+
+  Future<void> _showHint() async {
+    if (_solutionPreviewActive) {
+      return;
+    }
+
+    final hints = _engine.requestHintRuns(maxCount: 1);
+    if (hints.isEmpty) {
+      setState(() {
+        _clearHintData();
+      });
+      _showSnack('No useful hint right now.');
+      return;
+    }
+
+    final hint = hints.first;
+    final sourceColumnCards = _engine.state.tableau.columns[hint.fromColumn];
+    if (hint.startIndex < 0 || hint.startIndex >= sourceColumnCards.length) {
+      _showSnack('Hint unavailable.');
+      return;
+    }
+
+    final run = _engine.getEffectiveMoveRun(hint.fromColumn, hint.startIndex);
+    final targetColumns = <int>{};
+    if (run != null) {
+      final firstCard = sourceColumnCards[run.effectiveStartIndex];
+      targetColumns.addAll(
+        _engine
+            .getLegalDropTargets(firstCard)
+            .where((column) => column != hint.fromColumn),
+      );
+    }
+
+    setState(() {
+      _selectedColumn = hint.fromColumn;
+      _selectedStartIndex = hint.startIndex;
+      _selectedLength = hint.length;
+      _activeDragPayload = null;
+      _clearHintData();
+      _hintRunsByColumn[hint.fromColumn] = <HintFlashRun>[
+        HintFlashRun(startIndex: hint.startIndex, length: hint.length),
+      ];
+      _hintTargetColumns = targetColumns;
+      _hintFlashOn = true;
+    });
+
+    _hintClearTimer = Timer(const Duration(seconds: 2), () {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _hintFlashOn = false;
+      });
+    });
+
+    if (targetColumns.isEmpty) {
+      _showSnack('Hint: select column ${hint.fromColumn + 1}.');
+    } else {
+      final targetText = targetColumns.map((c) => c + 1).join(', ');
+      _showSnack('Hint: ${hint.fromColumn + 1} -> $targetText');
+    }
+  }
+
   Future<void> _afterRealMove() async {
     await _recordCompletedSolvableSeedIfNeeded();
     if (!mounted) {
@@ -397,7 +578,44 @@ class _PlayScreenState extends State<PlayScreen> {
   }
 
   void _onCardTap(int column, int index) {
-    _onColumnTap(column);
+    if (_solutionPreviewActive) {
+      return;
+    }
+
+    final run = _engine.getEffectiveMoveRun(column, index);
+    if (run == null || run.effectiveStartIndex != index) {
+      return;
+    }
+
+    setState(() {
+      _clearHintData();
+    });
+
+    final sourceCards = _engine.state.tableau.columns[column];
+    final runFirstCard = sourceCards[run.effectiveStartIndex];
+    final targetColumn = _pickBestAutoDestination(column, runFirstCard);
+    if (targetColumn != null) {
+      final moved = _engine.moveStack(
+        column,
+        run.effectiveStartIndex,
+        targetColumn,
+      );
+      if (!moved) {
+        _showSnack('Illegal move');
+        return;
+      }
+      setState(() {
+        _resetInteractionState();
+      });
+      unawaited(_afterRealMove());
+      return;
+    }
+
+    setState(() {
+      _selectedColumn = column;
+      _selectedStartIndex = run.effectiveStartIndex;
+      _selectedLength = run.length;
+    });
   }
 
   void _onColumnTap(int column) {
@@ -405,23 +623,41 @@ class _PlayScreenState extends State<PlayScreen> {
       return;
     }
 
-    if (_selectedColumn == null) {
-      setState(() => _selectedColumn = column);
-      return;
-    }
-    if (_selectedColumn == column) {
-      setState(() => _selectedColumn = null);
+    setState(() {
+      _clearHintData();
+    });
+
+    final selected = _selectedRunInfo(_engine.state);
+    if (selected == null) {
+      final topFaceUp = _engine.state.tableau.columns[column].lastIndexWhere(
+        (card) => card.faceUp,
+      );
+      if (topFaceUp >= 0) {
+        _onCardTap(column, topFaceUp);
+      }
       return;
     }
 
-    final from = _selectedColumn!;
-    final startIndex = _engine.state.tableau.columns[from].lastIndexWhere(
-      (card) => card.faceUp,
-    );
-    if (startIndex >= 0) {
-      _engine.moveStack(from, startIndex, column);
+    if (selected.fromColumn == column) {
+      setState(() {
+        _clearSelection();
+      });
+      return;
     }
-    setState(() => _selectedColumn = null);
+
+    final moved = _engine.moveStack(
+      selected.fromColumn,
+      selected.startIndex,
+      column,
+    );
+    if (!moved) {
+      _showSnack('Illegal move');
+      return;
+    }
+
+    setState(() {
+      _resetInteractionState();
+    });
     unawaited(_afterRealMove());
   }
 
@@ -460,7 +696,7 @@ class _PlayScreenState extends State<PlayScreen> {
                                 ? () {
                                     _engine.dealFromStock();
                                     setState(() {
-                                      _selectedColumn = null;
+                                      _resetInteractionState();
                                     });
                                     unawaited(_afterRealMove());
                                   }
@@ -499,15 +735,36 @@ class _PlayScreenState extends State<PlayScreen> {
                             columnIndex: i,
                             cards: state.tableau.columns[i],
                             tapEnabled: true,
-                            canDragFromIndex: (cardIndex) =>
-                                _engine.getEffectiveMoveRun(i, cardIndex) !=
-                                null,
+                            previewNextCardOnDrag: true,
+                            activeDragPayload: _activeDragPayload,
+                            selectedStartIndex: _selectedColumn == i
+                                ? _selectedStartIndex
+                                : null,
+                            selectedLength: _selectedColumn == i
+                                ? _selectedLength
+                                : null,
+                            isValidTapTarget: _isDropTargetHighlighted(
+                              i,
+                              state,
+                            ),
+                            hintRuns:
+                                _hintRunsByColumn[i] ?? const <HintFlashRun>[],
+                            hintFlashOn: _hintFlashOn,
+                            canDragFromIndex: (cardIndex) {
+                              final run = _engine.getEffectiveMoveRun(
+                                i,
+                                cardIndex,
+                              );
+                              return run != null &&
+                                  run.effectiveStartIndex == cardIndex;
+                            },
                             onBuildDragPayload: (cardIndex) {
                               final run = _engine.getEffectiveMoveRun(
                                 i,
                                 cardIndex,
                               );
-                              if (run == null) {
+                              if (run == null ||
+                                  run.effectiveStartIndex != cardIndex) {
                                 return DragRunPayload(
                                   fromColumn: i,
                                   startIndex: cardIndex,
@@ -516,7 +773,7 @@ class _PlayScreenState extends State<PlayScreen> {
                               }
 
                               final cards = List<PlayingCard>.of(
-                                state.tableau.columns[i].sublist(
+                                _engine.state.tableau.columns[i].sublist(
                                   run.effectiveStartIndex,
                                   run.effectiveStartIndex + run.length,
                                 ),
@@ -547,16 +804,32 @@ class _PlayScreenState extends State<PlayScreen> {
                                 return;
                               }
                               setState(() {
-                                _selectedColumn = null;
+                                _resetInteractionState();
                               });
                               unawaited(_afterRealMove());
                             },
                             onIllegalDrop: () => _showSnack('Illegal move'),
                             onCardTap: (cardIndex) => _onCardTap(i, cardIndex),
                             onColumnTap: () => _onColumnTap(i),
-                            onDragStarted: (_) {},
-                            onDragCanceled: () {},
-                            onDragCompleted: () {},
+                            onDragStarted: (payload) {
+                              setState(() {
+                                _clearHintData();
+                                _activeDragPayload = payload;
+                                _selectedColumn = payload.fromColumn;
+                                _selectedStartIndex = payload.startIndex;
+                                _selectedLength = payload.cards.length;
+                              });
+                            },
+                            onDragCanceled: () {
+                              setState(() {
+                                _activeDragPayload = null;
+                              });
+                            },
+                            onDragCompleted: () {
+                              setState(() {
+                                _activeDragPayload = null;
+                              });
+                            },
                           ),
                         ),
                       ),
@@ -566,80 +839,77 @@ class _PlayScreenState extends State<PlayScreen> {
                 SafeArea(
                   top: false,
                   child: Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: FilledButton.tonal(
-                            onPressed: _engine.canUndo
-                                ? () {
-                                    _engine.undo();
-                                    setState(() => _selectedColumn = null);
-                                    unawaited(_afterRealMove());
-                                  }
-                                : null,
-                            child: const Text('Undo'),
-                          ),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 6,
+                    ),
+                    child: Material(
+                      color: Theme.of(
+                        context,
+                      ).colorScheme.surfaceContainerHighest,
+                      borderRadius: BorderRadius.circular(14),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 2,
                         ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: FilledButton.tonal(
-                            onPressed: _engine.canRedo
-                                ? () {
-                                    _engine.redo();
-                                    setState(() => _selectedColumn = null);
-                                    unawaited(_afterRealMove());
-                                  }
-                                : null,
-                            child: const Text('Redo'),
-                          ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                          children: [
+                            IconButton(
+                              tooltip: 'Undo',
+                              onPressed: _engine.canUndo
+                                  ? () {
+                                      _engine.undo();
+                                      setState(() {
+                                        _resetInteractionState();
+                                      });
+                                      unawaited(_afterRealMove());
+                                    }
+                                  : null,
+                              icon: const Icon(Icons.undo),
+                            ),
+                            IconButton(
+                              tooltip: 'Redo',
+                              onPressed: _engine.canRedo
+                                  ? () {
+                                      _engine.redo();
+                                      setState(() {
+                                        _resetInteractionState();
+                                      });
+                                      unawaited(_afterRealMove());
+                                    }
+                                  : null,
+                              icon: const Icon(Icons.redo),
+                            ),
+                            IconButton(
+                              tooltip: 'Hint',
+                              onPressed: _showHint,
+                              icon: const Icon(Icons.lightbulb_outline),
+                            ),
+                            IconButton(
+                              tooltip: 'Restart',
+                              onPressed: () {
+                                setState(() {
+                                  _engine.restartSameDeal();
+                                  _solvableUsageRecorded = false;
+                                  _resetInteractionState();
+                                });
+                              },
+                              icon: const Icon(Icons.refresh),
+                            ),
+                            IconButton(
+                              tooltip: 'Menu',
+                              onPressed: () =>
+                                  Navigator.of(context).pushNamedAndRemoveUntil(
+                                    AppRoutes.home,
+                                    (route) => false,
+                                  ),
+                              icon: const Icon(Icons.menu),
+                            ),
+                          ],
                         ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: FilledButton.tonal(
-                            onPressed: () {
-                              _engine.requestHint();
-                              _showSnack('Hint not implemented yet.');
-                            },
-                            child: const Text('Hint'),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: FilledButton.tonal(
-                            onPressed: () {
-                              setState(() {
-                                _engine.restartSameDeal();
-                                _selectedColumn = null;
-                                _solvableUsageRecorded = false;
-                              });
-                            },
-                            child: const Text('Restart'),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: FilledButton.tonal(
-                            onPressed:
-                                (_solutionPrefixForCurrentSeed()?.isNotEmpty ??
-                                    false)
-                                ? _showSolutionSheet
-                                : null,
-                            child: const Text('Solution'),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: FilledButton(
-                            onPressed: () =>
-                                Navigator.of(context).pushNamedAndRemoveUntil(
-                                  AppRoutes.home,
-                                  (route) => false,
-                                ),
-                            child: const Text('Menu'),
-                          ),
-                        ),
-                      ],
+                      ),
                     ),
                   ),
                 ),
@@ -715,4 +985,18 @@ class _PlayScreenState extends State<PlayScreen> {
       ),
     );
   }
+}
+
+class _SelectedRunInfo {
+  const _SelectedRunInfo({
+    required this.fromColumn,
+    required this.startIndex,
+    required this.length,
+    required this.firstCard,
+  });
+
+  final int fromColumn;
+  final int startIndex;
+  final int length;
+  final PlayingCard firstCard;
 }
