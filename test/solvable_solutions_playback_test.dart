@@ -137,6 +137,7 @@ void main() {
       expect(afterSnapshot, beforeSnapshot);
     },
   );
+
   test('known verified prefix has both deal and move steps', () {
     final steps = solutionFirst30_1Suit[2] ?? solutionFirst30_1Suit[29];
     if (steps == null || steps.isEmpty) {
@@ -150,6 +151,7 @@ void main() {
     expect(hasDeal, isTrue);
     expect(hasMove, isTrue);
   });
+
   test('seed 2 step 6 is MOVE (not DEAL)', () {
     final steps = solutionFirst30_1Suit[2];
     if (steps == null || steps.length <= 5) {
@@ -160,5 +162,53 @@ void main() {
     expect(steps[5].kind, SolutionStepKind.move);
     expect(steps[5].isMove, isTrue);
     expect(steps[5].isDeal, isFalse);
+  });
+
+  test('seed 2 first six steps replay with legal move at step 6', () {
+    final steps = solutionFirst30_1Suit[2];
+    if (steps == null || steps.length < 6) {
+      expect(true, isTrue);
+      return;
+    }
+
+    final engine = GameEngine();
+    engine.newGame(
+      difficulty: Difficulty.oneSuit,
+      dealSource: const RandomDealSource(2),
+    );
+
+    for (var i = 0; i < 5; i++) {
+      expect(steps[i].isDeal, isTrue, reason: 'step ${i + 1} should be DEAL');
+      expect(engine.dealFromStock(), isTrue);
+    }
+
+    final move = steps[5];
+    expect(move.kind, SolutionStepKind.move);
+    expect(move.fromColumn, isNotNull);
+    expect(move.toColumn, isNotNull);
+    expect(move.startIndex, isNotNull);
+
+    final run = engine.getEffectiveMoveRun(move.fromColumn!, move.startIndex!);
+    expect(run, isNotNull);
+
+    if (move.movedLength != null) {
+      expect(run!.length, move.movedLength);
+    }
+
+    final firstCard = engine
+        .state
+        .tableau
+        .columns[move.fromColumn!][run!.effectiveStartIndex];
+    final drop = engine.canDropRun(move.toColumn!, firstCard);
+    expect(
+      drop.isValid,
+      isTrue,
+      reason: 'expected legal drop for step 6, got: ${drop.reason}',
+    );
+
+    expect(
+      engine.moveStack(move.fromColumn!, move.startIndex!, move.toColumn!),
+      isTrue,
+    );
   });
 }

@@ -53,10 +53,17 @@ class _SolutionPreviewScreenState extends State<SolutionPreviewScreen> {
   void initState() {
     super.initState();
     _engine = GameEngine();
+    // Always replay from a fresh initial state for this seed+difficulty.
     _engine.newGame(
       difficulty: widget.args.deal.difficulty,
       dealSource: RandomDealSource(widget.args.deal.seed),
     );
+    if (kDebugMode) {
+      debugPrint(
+        'Solution preview fresh start seed=${widget.args.deal.seed} '
+        'difficulty=${widget.args.deal.difficulty.name}',
+      );
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       unawaited(_runSteps());
     });
@@ -111,6 +118,93 @@ class _SolutionPreviewScreenState extends State<SolutionPreviewScreen> {
     return 'Move ${step.fromColumn}->${step.toColumn}$lengthLabel';
   }
 
+  String _cardLabel(PlayingCard card) {
+    final face = card.faceUp ? 'U' : 'D';
+    return '${card.rank.label}${card.suit.symbol}$face';
+  }
+
+  String _topFaceUpLabel(List<PlayingCard> column) {
+    for (var i = column.length - 1; i >= 0; i--) {
+      final card = column[i];
+      if (card.faceUp) {
+        return _cardLabel(card);
+      }
+    }
+    return '-';
+  }
+
+  String _tailLabel(List<PlayingCard> column, {int maxCards = 5}) {
+    if (column.isEmpty) {
+      return '[]';
+    }
+    final start = column.length > maxCards ? column.length - maxCards : 0;
+    final cards = column.sublist(start).map(_cardLabel).join(',');
+    return '[$cards]';
+  }
+
+  void _debugLogDealState() {
+    if (!kDebugMode) {
+      return;
+    }
+    final state = _engine.state;
+    final lengths = state.tableau.columns.map((c) => c.length).join(',');
+    final tops = state.tableau.columns.map(_topFaceUpLabel).join(',');
+    debugPrint(
+      'Solution preview deal state seed=${widget.args.deal.seed} '
+      'stock=${state.stock.cards.length} lengths=[$lengths] '
+      'topFaceUp=[$tops]',
+    );
+  }
+
+  void _debugLogMoveFailure(SolutionStepDto step, String reason) {
+    if (!kDebugMode || !step.isMove) {
+      return;
+    }
+
+    final from = step.fromColumn;
+    final to = step.toColumn;
+    final start = step.startIndex;
+    final state = _engine.state;
+    if (from == null || to == null || start == null) {
+      debugPrint(
+        'Solution preview move failure seed=${widget.args.deal.seed} '
+        'reason=$reason dtoMissing=true',
+      );
+      return;
+    }
+
+    final source = (from >= 0 && from < state.tableau.columns.length)
+        ? state.tableau.columns[from]
+        : const <PlayingCard>[];
+    final target = (to >= 0 && to < state.tableau.columns.length)
+        ? state.tableau.columns[to]
+        : const <PlayingCard>[];
+    final run = (from >= 0 && from < state.tableau.columns.length)
+        ? _engine.getEffectiveMoveRun(from, start)
+        : null;
+    final movedSegment = run == null
+        ? const <PlayingCard>[]
+        : source.sublist(
+            run.effectiveStartIndex,
+            run.effectiveStartIndex + run.length,
+          );
+    final firstCard = movedSegment.isEmpty ? null : movedSegment.first;
+    final drop = firstCard == null ? null : _engine.canDropRun(to, firstCard);
+    final targetTop = target.isEmpty ? '-' : _cardLabel(target.last);
+
+    debugPrint(
+      'Solution preview MOVE failure seed=${widget.args.deal.seed} '
+      'step=${_stepIndex + 1}/${widget.args.steps.length} '
+      'from=$from to=$to start=$start movedLength=${step.movedLength} '
+      'reason=$reason dropReason=${drop?.reason ?? '-'}',
+    );
+    debugPrint(
+      'Solution preview MOVE failure sourceTail=${_tailLabel(source)} '
+      'moved=${movedSegment.map(_cardLabel).join(',')} '
+      'targetTop=$targetTop targetTail=${_tailLabel(target)}',
+    );
+  }
+
   String _explainInvalidStep(SolutionStepDto step) {
     if (step.isDeal) {
       return _engine.state.stock.cards.length < 10
@@ -149,7 +243,7 @@ class _SolutionPreviewScreenState extends State<SolutionPreviewScreen> {
     final firstCard = source[run.effectiveStartIndex];
     final drop = _engine.canDropRun(to, firstCard);
     if (!drop.isValid) {
-      return 'drop invalid from=$from to=$to start=$start';
+      return 'drop invalid from=$from to=$to start=$start: ${drop.reason ?? 'unknown'}';
     }
 
     return 'engine rejected move from=$from to=$to start=$start';
@@ -175,7 +269,11 @@ class _SolutionPreviewScreenState extends State<SolutionPreviewScreen> {
 
     bool applied;
     if (step.isDeal) {
+      // Keep semantics identical to the live gameplay Deal button.
       applied = _engine.dealFromStock();
+      if (applied) {
+        _debugLogDealState();
+      }
     } else {
       if (!step.isMove ||
           step.fromColumn == null ||
@@ -252,6 +350,9 @@ class _SolutionPreviewScreenState extends State<SolutionPreviewScreen> {
       if (!ok) {
         final reason = _explainInvalidStep(step);
         final failureLabel = step.isMove ? 'MOVE failed' : 'DEAL failed';
+        if (step.isMove) {
+          _debugLogMoveFailure(step, reason);
+        }
         if (kDebugMode) {
           debugPrint(
             'Solution preview $failureLabel at step ${i + 1}: '
