@@ -10,14 +10,10 @@ import '../../game/persistence/save_repo.dart';
 import '../../game/persistence/save_slots.dart';
 import '../../game/solvable/solvable_seeds.dart';
 import '../../game/solvable/solvable_seed_usage_tracker.dart';
-import '../../game/solvable/solvable_solution_step.dart';
-import '../../game/solvable/solvable_solutions_1suit_verified.dart';
 import '../../game/solvable/verified_solvable_data_override.dart';
 import '../../utils/date_formatters.dart';
 import '../daily/daily_calendar_logic.dart';
 import '../play/play_screen.dart';
-import '../preview/deal_choice.dart';
-import '../preview/solution_preview_screen.dart';
 import '../settings/settings_repo.dart';
 
 bool isDailyDealAvailable({
@@ -216,39 +212,8 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Future<void> _openSolutionPreview({
-    required DealChoice deal,
-    required List<SolutionStepDto> steps,
-    required String title,
-    required bool fast,
-  }) {
-    return Navigator.of(context).pushNamed(
-      AppRoutes.solutionPreview,
-      arguments: SolutionPreviewArgs(
-        deal: deal,
-        steps: steps,
-        title: title,
-        fast: fast,
-      ),
-    );
-  }
-
   int _dailySeedForDateKey(String dateKey) {
     return pickDailySolvableSeed(difficulty: _difficulty, dateKey: dateKey);
-  }
-
-  List<SolutionStepDto>? _prefixForSeed(int seed) {
-    if (_difficulty != Difficulty.oneSuit) {
-      return null;
-    }
-    return verifiedSolutionPrefixForSeed1Suit(seed);
-  }
-
-  List<SolutionStepDto>? _fullForSeed(int seed) {
-    if (_difficulty != Difficulty.oneSuit) {
-      return null;
-    }
-    return verifiedFullSolutionForSeed1Suit(seed);
   }
 
   Future<void> _startRandomTotallyRandom() async {
@@ -276,10 +241,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
     final todayDateKey = toDateKeyLocal(DateTime.now());
     final todaySeed = _dailySeedForDateKey(todayDateKey);
-    final todayPrefix = _prefixForSeed(todaySeed);
-    final todayFull = _fullForSeed(todaySeed);
-    final canPreviewToday = todayPrefix != null && todayPrefix.isNotEmpty;
-    final canShowFullToday = todayFull != null && todayFull.isNotEmpty;
 
     final rawDateKey = _resumeDaily == null
         ? null
@@ -318,62 +279,6 @@ class _HomeScreenState extends State<HomeScreen> {
                     },
                     child: Text(resumeLabel),
                   ),
-                FilledButton.tonal(
-                  onPressed: canPreviewToday
-                      ? () {
-                          Navigator.of(context).pop();
-                          _openSolutionPreview(
-                            deal: DealChoice(
-                              difficulty: _difficulty,
-                              mode: DealChoiceMode.daily,
-                              guaranteed: true,
-                              seed: todaySeed,
-                              dateKey: todayDateKey,
-                            ),
-                            steps: todayPrefix,
-                            title: 'Preview First 30 Steps',
-                            fast: false,
-                          );
-                        }
-                      : null,
-                  child: const Text('Preview first 30 steps'),
-                ),
-                if (!canPreviewToday)
-                  const Padding(
-                    padding: EdgeInsets.only(top: 4),
-                    child: Text(
-                      'No solution prefix available for today\'s seed.',
-                      style: TextStyle(fontSize: 12, color: Colors.black54),
-                    ),
-                  ),
-                FilledButton.tonal(
-                  onPressed: canShowFullToday
-                      ? () {
-                          Navigator.of(context).pop();
-                          _openSolutionPreview(
-                            deal: DealChoice(
-                              difficulty: _difficulty,
-                              mode: DealChoiceMode.daily,
-                              guaranteed: true,
-                              seed: todaySeed,
-                              dateKey: todayDateKey,
-                            ),
-                            steps: todayFull,
-                            title: 'Show Full Proof (Fast)',
-                            fast: true,
-                          );
-                        }
-                      : null,
-                  child: const Text('Show full proof (fast)'),
-                ),
-                if (!canShowFullToday)
-                  const Padding(
-                    padding: EdgeInsets.only(top: 4),
-                    child: Text(
-                      'Full solution not available for this seed yet.',
-                      style: TextStyle(fontSize: 12, color: Colors.black54),
-                    ),
-                  ),
                 OutlinedButton(
                   onPressed: () {
                     Navigator.of(context).pop();
@@ -382,6 +287,11 @@ class _HomeScreenState extends State<HomeScreen> {
                     ).pushNamed(AppRoutes.dailyCalendar);
                   },
                   child: const Text('Open Daily Calendar'),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Guaranteed deals are solver-verified solvable under strict rules. The verified pool is generated offline with time limits, so it grows gradually.',
+                  style: Theme.of(context).textTheme.bodySmall,
                 ),
               ],
             ),
@@ -394,20 +304,6 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _openRandomSheet() {
     final hasGuaranteed = _hasGuaranteedRandomPool();
     final previewSeed = _peekGuaranteedRandomSeed();
-    final previewPrefix = previewSeed == null
-        ? null
-        : _prefixForSeed(previewSeed);
-    final previewFull = previewSeed == null ? null : _fullForSeed(previewSeed);
-    final canPreviewPrefix =
-        hasGuaranteed &&
-        previewSeed != null &&
-        previewPrefix != null &&
-        previewPrefix.isNotEmpty;
-    final canPreviewFull =
-        hasGuaranteed &&
-        previewSeed != null &&
-        previewFull != null &&
-        previewFull.isNotEmpty;
 
     return showModalBottomSheet<void>(
       context: context,
@@ -448,65 +344,11 @@ class _HomeScreenState extends State<HomeScreen> {
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
                   ),
-                FilledButton.tonal(
-                  onPressed: canPreviewPrefix
-                      ? () {
-                          Navigator.of(context).pop();
-                          _openSolutionPreview(
-                            deal: DealChoice(
-                              difficulty: _difficulty,
-                              mode: DealChoiceMode.random,
-                              guaranteed: true,
-                              seed: previewSeed,
-                            ),
-                            steps: previewPrefix,
-                            title: 'Preview First 30 Steps',
-                            fast: false,
-                          );
-                        }
-                      : null,
-                  child: const Text('Preview first 30 steps'),
-                ),
-                FilledButton.tonal(
-                  onPressed: canPreviewFull
-                      ? () {
-                          Navigator.of(context).pop();
-                          _openSolutionPreview(
-                            deal: DealChoice(
-                              difficulty: _difficulty,
-                              mode: DealChoiceMode.random,
-                              guaranteed: true,
-                              seed: previewSeed,
-                            ),
-                            steps: previewFull,
-                            title: 'Show Full Proof (Fast)',
-                            fast: true,
-                          );
-                        }
-                      : null,
-                  child: const Text('Show full proof (fast)'),
-                ),
                 if (!hasGuaranteed)
                   const Padding(
                     padding: EdgeInsets.only(top: 6),
                     child: Text(
                       'No verified winnable deals available yet.',
-                      style: TextStyle(fontSize: 12, color: Colors.black54),
-                    ),
-                  )
-                else if (!canPreviewPrefix)
-                  const Padding(
-                    padding: EdgeInsets.only(top: 6),
-                    child: Text(
-                      'No solution prefix available for current guaranteed seed.',
-                      style: TextStyle(fontSize: 12, color: Colors.black54),
-                    ),
-                  )
-                else if (!canPreviewFull)
-                  const Padding(
-                    padding: EdgeInsets.only(top: 6),
-                    child: Text(
-                      'Full solution not available for current guaranteed seed.',
                       style: TextStyle(fontSize: 12, color: Colors.black54),
                     ),
                   ),
@@ -516,6 +358,11 @@ class _HomeScreenState extends State<HomeScreen> {
                     _startRandomTotallyRandom();
                   },
                   child: const Text('Play (Totally random)'),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Guaranteed deals are solver-verified solvable under strict rules. The verified pool is generated offline with time limits, so it grows gradually.',
+                  style: Theme.of(context).textTheme.bodySmall,
                 ),
               ],
             ),
@@ -664,6 +511,12 @@ class _HomeScreenState extends State<HomeScreen> {
         compact: !isPortrait,
       ),
       _menuItem(
+        title: 'Help / Info',
+        subtitle: 'Rules, Guaranteed deals, Privacy.',
+        onTap: () => Navigator.of(context).pushNamed(AppRoutes.help),
+        compact: !isPortrait,
+      ),
+      _menuItem(
         title: 'Settings',
         subtitle: 'Difficulty, tap mode, deal rule, orientation lock.',
         onTap: () => Navigator.of(context).pushNamed(AppRoutes.settings),
@@ -733,6 +586,11 @@ class _HomeScreenState extends State<HomeScreen> {
                               ),
                           itemBuilder: (context, index) => items[index],
                         ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Guaranteed deals are solver-verified solvable under strict rules. The verified pool is generated offline with time limits, so it grows gradually.',
+                  style: Theme.of(context).textTheme.bodySmall,
                 ),
               ],
             ),
