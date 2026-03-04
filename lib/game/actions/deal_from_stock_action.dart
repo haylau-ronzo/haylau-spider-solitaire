@@ -7,6 +7,22 @@ class DealFromStockAction implements GameAction {
   const DealFromStockAction();
 
   @override
+  String get type => 'dealFromStock';
+
+  @override
+  Map<String, dynamic> toJson() {
+    return <String, dynamic>{'type': type, 'payload': <String, dynamic>{}};
+  }
+
+  static DealFromStockAction fromJson(Map<String, dynamic> json) {
+    final actionType = json['type'] as String?;
+    if (actionType != 'dealFromStock') {
+      throw FormatException('Invalid action type for DealFromStockAction.');
+    }
+    return const DealFromStockAction();
+  }
+
+  @override
   GameState apply(GameState state) {
     if (state.stock.cards.length < 10) {
       return state;

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../game/model/card.dart';
+import 'card_face_label.dart';
 
 class PlaceholderCardView extends StatelessWidget {
   const PlaceholderCardView({super.key, required this.card});
@@ -9,9 +10,11 @@ class PlaceholderCardView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isRed =
-        card.suit == CardSuit.hearts || card.suit == CardSuit.diamonds;
-    final textColor = isRed ? Colors.red.shade800 : Colors.black87;
+    final label = buildCornerLabel(card.rank, card.suit);
+    final textColor = isRedSuit(card.suit)
+        ? Colors.red.shade800
+        : Colors.black87;
+    final fontSize = card.rank == CardRank.ten ? 12.0 : 13.0;
 
     if (!card.faceUp) {
       return Container(
@@ -33,12 +36,19 @@ class PlaceholderCardView extends StatelessWidget {
         color: Colors.white,
         border: Border.all(color: Colors.black26),
       ),
-      padding: const EdgeInsets.all(6),
+      padding: const EdgeInsets.fromLTRB(6, 4, 6, 6),
       child: Align(
         alignment: Alignment.topLeft,
         child: Text(
-          '${card.rank.label}${card.suit.symbol}',
-          style: TextStyle(fontWeight: FontWeight.w700, color: textColor),
+          label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            fontWeight: FontWeight.w800,
+            color: textColor,
+            fontSize: fontSize,
+            height: 1,
+          ),
         ),
       ),
     );

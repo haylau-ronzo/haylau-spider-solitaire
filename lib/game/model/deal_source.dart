@@ -1,7 +1,10 @@
+import '../solvable/solvable_seeds.dart';
+import 'difficulty.dart';
+
 sealed class DealSource {
   const DealSource();
 
-  int toSeed();
+  int toSeed({required Difficulty difficulty});
 }
 
 class RandomDealSource extends DealSource {
@@ -9,7 +12,7 @@ class RandomDealSource extends DealSource {
   final int seed;
 
   @override
-  int toSeed() => seed;
+  int toSeed({required Difficulty difficulty}) => seed;
 }
 
 class DailyDealSource extends DealSource {
@@ -17,19 +20,46 @@ class DailyDealSource extends DealSource {
   final String dateKeyLocal;
 
   @override
-  int toSeed() {
-    var hash = 0;
-    for (final unit in dateKeyLocal.codeUnits) {
-      hash = ((hash * 31) + unit) & 0x7fffffff;
-    }
-    return hash;
+  int toSeed({required Difficulty difficulty}) {
+    return _hashDateKey(dateKeyLocal);
   }
 }
 
-class SolvableLibraryDealSource extends DealSource {
-  const SolvableLibraryDealSource(this.index);
+class DailySolvableDealSource extends DealSource {
+  const DailySolvableDealSource(this.dateKeyLocal);
+  final String dateKeyLocal;
+
+  @override
+  int toSeed({required Difficulty difficulty}) {
+    if (!hasDailySolvableSeeds(difficulty)) {
+      return _hashDateKey(dateKeyLocal);
+    }
+
+    if (difficulty == Difficulty.oneSuit) {
+      return pickDailySolvableSeed1Suit(dateKeyLocal);
+    }
+    final index = _hashDateKey(dateKeyLocal);
+    return pickSolvableSeed(difficulty: difficulty, index: index);
+  }
+}
+
+class RandomSolvableDealSource extends DealSource {
+  const RandomSolvableDealSource(this.index);
   final int index;
 
   @override
-  int toSeed() => ((index + 1) * 7919) & 0x7fffffff;
+  int toSeed({required Difficulty difficulty}) {
+    if (difficulty == Difficulty.oneSuit) {
+      return pickRandomSolvableSeed1Suit(index);
+    }
+    return pickSolvableSeed(difficulty: difficulty, index: index);
+  }
+}
+
+int _hashDateKey(String dateKeyLocal) {
+  var hash = 0;
+  for (final unit in dateKeyLocal.codeUnits) {
+    hash = ((hash * 31) + unit) & 0x7fffffff;
+  }
+  return hash;
 }

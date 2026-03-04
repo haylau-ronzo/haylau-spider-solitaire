@@ -1,0 +1,17 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Dart & Flutter (Web)",
+      "request": "launch",
+      "type": "dart",
+      "deviceId": "chrome"
+    },
+    {
+      "name": "Dart & Flutter (Android)",
+      "request": "launch",
+      "type": "dart"
+      // No deviceId: uses whatever is selected in the status bar
+    }
+  ]
+}

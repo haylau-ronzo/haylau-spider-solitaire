@@ -1,16 +1,16 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import 'app/app.dart';
+import 'app/app_services.dart';
+import 'utils/orientation_lock.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Lock to landscape (both directions)
-  await SystemChrome.setPreferredOrientations([
-    DeviceOrientation.landscapeLeft,
-    DeviceOrientation.landscapeRight,
-  ]);
+  await AppServices.initialize();
+  await applyOrientationLock(
+    AppServices.settingsRepo.current().orientationLock,
+  );
 
   runApp(const SpiderSolitaireApp());
 }

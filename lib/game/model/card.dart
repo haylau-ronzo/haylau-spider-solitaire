@@ -19,10 +19,10 @@ enum CardRank {
 }
 
 enum CardSuit {
-  spades('♠'),
-  hearts('♥'),
-  diamonds('♦'),
-  clubs('♣');
+  spades('\u2660'),
+  hearts('\u2665'),
+  diamonds('\u2666'),
+  clubs('\u2663');
 
   const CardSuit(this.symbol);
   final String symbol;
