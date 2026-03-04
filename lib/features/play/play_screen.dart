@@ -6,19 +6,26 @@ import 'package:flutter/scheduler.dart';
 import '../../app/app_services.dart';
 import '../../app/routes.dart';
 import '../../game/engine/game_engine.dart';
+import '../../game/model/card.dart';
 import '../../game/model/deal_source.dart';
 import '../../game/model/difficulty.dart';
 import '../../game/model/game_state.dart';
+import '../../game/persistence/save_model.dart';
 import '../../game/solvable/solvable_seed_usage_tracker.dart';
 import '../../game/solvable/solvable_solution_step.dart';
 import '../../game/solvable/solvable_solutions_1suit_verified.dart';
 import 'widgets/tableau_column_view.dart';
 
 class PlayScreenArgs {
-  const PlayScreenArgs({required this.difficulty, required this.dealSource});
+  const PlayScreenArgs({
+    required this.difficulty,
+    required this.dealSource,
+    this.resumeSave,
+  });
 
   final Difficulty difficulty;
   final DealSource dealSource;
+  final SaveModel? resumeSave;
 }
 
 class PlayScreen extends StatefulWidget {
@@ -54,10 +61,19 @@ class _PlayScreenState extends State<PlayScreen> {
   void initState() {
     super.initState();
     _engine = GameEngine();
-    _engine.newGame(
-      difficulty: widget.args.difficulty,
-      dealSource: widget.args.dealSource,
-    );
+    if (widget.args.resumeSave != null) {
+      _engine.restoreState(
+        widget.args.resumeSave!.gameState,
+        undoStack: widget.args.resumeSave!.undoStack,
+        redoStack: widget.args.resumeSave!.redoStack,
+      );
+    } else {
+      _engine.newGame(
+        difficulty: widget.args.difficulty,
+        dealSource: widget.args.dealSource,
+      );
+    }
+
     _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted) {
         setState(() {});
@@ -380,6 +396,10 @@ class _PlayScreenState extends State<PlayScreen> {
     setState(() {});
   }
 
+  void _onCardTap(int column, int index) {
+    _onColumnTap(column);
+  }
+
   void _onColumnTap(int column) {
     if (_solutionPreviewActive) {
       return;
@@ -476,9 +496,67 @@ class _PlayScreenState extends State<PlayScreen> {
                         (i) => Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 4),
                           child: TableauColumnView(
+                            columnIndex: i,
                             cards: state.tableau.columns[i],
-                            onTap: () => _onColumnTap(i),
-                            isSelected: _selectedColumn == i,
+                            tapEnabled: true,
+                            canDragFromIndex: (cardIndex) =>
+                                _engine.getEffectiveMoveRun(i, cardIndex) !=
+                                null,
+                            onBuildDragPayload: (cardIndex) {
+                              final run = _engine.getEffectiveMoveRun(
+                                i,
+                                cardIndex,
+                              );
+                              if (run == null) {
+                                return DragRunPayload(
+                                  fromColumn: i,
+                                  startIndex: cardIndex,
+                                  cards: const <PlayingCard>[],
+                                );
+                              }
+
+                              final cards = List<PlayingCard>.of(
+                                state.tableau.columns[i].sublist(
+                                  run.effectiveStartIndex,
+                                  run.effectiveStartIndex + run.length,
+                                ),
+                              );
+                              return DragRunPayload(
+                                fromColumn: i,
+                                startIndex: run.effectiveStartIndex,
+                                cards: cards,
+                              );
+                            },
+                            canAcceptDrop: (payload) {
+                              if (payload.cards.isEmpty ||
+                                  payload.fromColumn == i) {
+                                return false;
+                              }
+                              return _engine
+                                  .canDropRun(i, payload.cards.first)
+                                  .isValid;
+                            },
+                            onAcceptDrop: (payload) {
+                              final moved = _engine.moveStack(
+                                payload.fromColumn,
+                                payload.startIndex,
+                                i,
+                              );
+                              if (!moved) {
+                                _showSnack('Illegal move');
+                                return;
+                              }
+                              setState(() {
+                                _selectedColumn = null;
+                              });
+                              unawaited(_afterRealMove());
+                            },
+                            onIllegalDrop: () => _showSnack('Illegal move'),
+                            onCardTap: (cardIndex) => _onCardTap(i, cardIndex),
+                            onColumnTap: () => _onColumnTap(i),
+                            onDragStarted: (_) {},
+                            onDragCanceled: () {},
+                            onDragCompleted: () {},
                           ),
                         ),
                       ),
@@ -542,9 +620,11 @@ class _PlayScreenState extends State<PlayScreen> {
                         const SizedBox(width: 8),
                         Expanded(
                           child: FilledButton.tonal(
-                            onPressed: _solutionPrefixForCurrentSeed() == null
-                                ? null
-                                : _showSolutionSheet,
+                            onPressed:
+                                (_solutionPrefixForCurrentSeed()?.isNotEmpty ??
+                                    false)
+                                ? _showSolutionSheet
+                                : null,
                             child: const Text('Solution'),
                           ),
                         ),
