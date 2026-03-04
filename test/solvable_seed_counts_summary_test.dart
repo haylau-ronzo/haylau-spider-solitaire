@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:haylau_spider_solitaire/game/model/difficulty.dart';
 import 'package:haylau_spider_solitaire/game/persistence/solvable_seed_usage_repo.dart';
 import 'package:haylau_spider_solitaire/game/solvable/solvable_seed_counts_summary.dart';
 import 'package:haylau_spider_solitaire/game/solvable/solvable_seeds.dart';
@@ -13,17 +14,35 @@ void main() {
       await repo.markRandomUsedSeed1Suit(346782);
 
       final summary = buildSolvableSeedCountsSummary(repo.current());
+      final oneSuitPool = winnableSeedsForDifficulty(Difficulty.oneSuit);
 
-      expect(summary.daily1SuitTotal, dailySolvableSeeds1Suit.length);
-      expect(summary.random1SuitTotal, randomSolvableSeeds1Suit.length);
-      expect(
-        summary.daily1SuitUsed,
-        inInclusiveRange(0, summary.daily1SuitTotal),
-      );
-      expect(
-        summary.random1SuitUsed,
-        inInclusiveRange(0, summary.random1SuitTotal),
-      );
+      expect(summary.oneSuit.total, oneSuitPool.toSet().length);
+      expect(summary.oneSuit.used, inInclusiveRange(0, summary.oneSuit.total));
+      expect(summary.twoSuit.used, 0);
+      expect(summary.fourSuit.used, 0);
+    },
+  );
+
+  test(
+    'solvable seed counts summary uses combined unique used seeds',
+    () async {
+      final repo = InMemorySolvableSeedUsageRepo();
+      final oneSuitPool = winnableSeedsForDifficulty(Difficulty.oneSuit);
+      if (oneSuitPool.length < 2) {
+        expect(true, isTrue);
+        return;
+      }
+
+      final seedA = oneSuitPool.first;
+      final seedB = oneSuitPool.last;
+
+      await repo.markDailyUsedSeed1Suit(seedA);
+      await repo.markRandomUsedSeed1Suit(seedA);
+      await repo.markRandomUsedSeed1Suit(seedB);
+
+      final summary = buildSolvableSeedCountsSummary(repo.current());
+
+      expect(summary.oneSuit.used, 2);
     },
   );
 
@@ -37,8 +56,7 @@ void main() {
 
       final summary = buildSolvableSeedCountsSummary(repo.current());
 
-      expect(summary.daily1SuitUsed, 0);
-      expect(summary.random1SuitUsed, 0);
+      expect(summary.oneSuit.used, 0);
     },
   );
 }

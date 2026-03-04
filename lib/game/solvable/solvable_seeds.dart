@@ -7,15 +7,18 @@ List<int> get dailySolvableSeeds1Suit =>
 List<int> get randomSolvableSeeds1Suit =>
     verifiedRandomSeedsForDifficulty(Difficulty.oneSuit);
 List<int> get solvableSeeds2Suit =>
-    verifiedRandomSeedsForDifficulty(Difficulty.twoSuit);
+    verifiedWinnablePoolForDifficulty(Difficulty.twoSuit);
 List<int> get solvableSeeds4Suit =>
-    verifiedRandomSeedsForDifficulty(Difficulty.fourSuit);
+    verifiedWinnablePoolForDifficulty(Difficulty.fourSuit);
+
+List<int> winnableSeedsForDifficulty(Difficulty difficulty) =>
+    verifiedWinnablePoolForDifficulty(difficulty);
 
 List<int> randomSolvableSeedsForDifficulty(Difficulty difficulty) =>
-    verifiedRandomSeedsForDifficulty(difficulty);
+    verifiedWinnablePoolForDifficulty(difficulty);
 
 List<int> dailySolvableSeedsForDifficulty(Difficulty difficulty) =>
-    verifiedDailySeedsForDifficulty(difficulty);
+    verifiedWinnablePoolForDifficulty(difficulty);
 
 bool hasRandomSolvableSeeds(
   Difficulty difficulty, {
@@ -28,13 +31,13 @@ bool hasRandomSolvableSeeds(
   final pools =
       randomPoolsOverride ??
       <Difficulty, List<int>>{
-        Difficulty.oneSuit: verifiedRandomSeedsForDifficulty(
+        Difficulty.oneSuit: verifiedWinnablePoolForDifficulty(
           Difficulty.oneSuit,
         ),
-        Difficulty.twoSuit: verifiedRandomSeedsForDifficulty(
+        Difficulty.twoSuit: verifiedWinnablePoolForDifficulty(
           Difficulty.twoSuit,
         ),
-        Difficulty.fourSuit: verifiedRandomSeedsForDifficulty(
+        Difficulty.fourSuit: verifiedWinnablePoolForDifficulty(
           Difficulty.fourSuit,
         ),
       };
@@ -46,7 +49,7 @@ bool hasDailySolvableSeeds(Difficulty difficulty) {
     return false;
   }
 
-  return verifiedDailySeedsForDifficulty(difficulty).isNotEmpty;
+  return verifiedWinnablePoolForDifficulty(difficulty).isNotEmpty;
 }
 
 int pickDailySolvableSeed1Suit(String dateKey) {
@@ -64,22 +67,13 @@ int pickDailySolvableSeed({
   required Difficulty difficulty,
   required String dateKey,
 }) {
-  final pools = verifiedDailyPoolsForDifficulty(
-    difficulty,
-  ).where((pool) => pool.seeds.isNotEmpty).toList(growable: false);
-
-  if (pools.isNotEmpty) {
-    return pickDailySolvableSeedFromPools(dateKey: dateKey, pools: pools);
+  final pool = verifiedWinnablePoolForDifficulty(difficulty);
+  if (pool.isEmpty) {
+    return _hashDateKey(dateKey);
   }
 
-  final dailySeeds = verifiedDailySeedsForDifficulty(difficulty);
-  if (dailySeeds.isNotEmpty) {
-    final index = _hashDateKey(dateKey) % dailySeeds.length;
-    return dailySeeds[index];
-  }
-
-  final fallbackIndex = _hashDateKey(dateKey);
-  return pickRandomSolvableSeed(difficulty: difficulty, index: fallbackIndex);
+  final index = _hashDateKey(dateKey) % pool.length;
+  return pool[index];
 }
 
 int pickDailySolvableSeedFromPools({
@@ -103,7 +97,7 @@ int pickRandomSolvableSeed({
   required Difficulty difficulty,
   required int index,
 }) {
-  final seeds = verifiedRandomSeedsForDifficulty(difficulty);
+  final seeds = verifiedWinnablePoolForDifficulty(difficulty);
   if (seeds.isEmpty) {
     // Safe fallback: non-guaranteed deterministic seed.
     return index & 0x7fffffff;

@@ -8,10 +8,14 @@ import '../../game/persistence/save_model.dart';
 import '../../game/persistence/save_repo.dart';
 import '../../game/persistence/save_slots.dart';
 import '../../game/solvable/solvable_seeds.dart';
+import '../../game/solvable/solvable_solution_step.dart';
+import '../../game/solvable/solvable_solutions_1suit_verified.dart';
 import '../../game/solvable/verified_solvable_data_override.dart';
 import '../../utils/date_formatters.dart';
 import '../daily/daily_calendar_logic.dart';
 import '../play/play_screen.dart';
+import '../preview/deal_choice.dart';
+import '../preview/solution_preview_screen.dart';
 import '../settings/settings_repo.dart';
 
 bool isDailyDealAvailable({
@@ -25,6 +29,19 @@ bool isDailyDealAvailable({
   }
   return dailyPoolOverride?.call(difficulty) ??
       hasDailySolvableSeeds(difficulty);
+}
+
+bool isRandomGuaranteedAvailable({
+  required Difficulty difficulty,
+  bool Function(Difficulty difficulty)? randomPoolOverride,
+  bool? ignoreVerifiedOverride,
+}) {
+  final ignore = ignoreVerifiedOverride ?? ignoreVerifiedSolvableData;
+  if (ignore) {
+    return false;
+  }
+  return randomPoolOverride?.call(difficulty) ??
+      hasRandomSolvableSeeds(difficulty);
 }
 
 class HomeScreen extends StatefulWidget {
@@ -130,8 +147,10 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   bool _hasGuaranteedRandomPool() {
-    return widget.hasGuaranteedRandomPoolOverride?.call(_difficulty) ??
-        hasRandomSolvableSeeds(_difficulty);
+    return isRandomGuaranteedAvailable(
+      difficulty: _difficulty,
+      randomPoolOverride: widget.hasGuaranteedRandomPoolOverride,
+    );
   }
 
   bool _hasDailyPool() {
@@ -141,39 +160,92 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  int _selectGuaranteedRandomIndex() {
-    final seeds = randomSolvableSeedsForDifficulty(_difficulty);
+  int _selectGuaranteedRandomIndex({required bool advance}) {
+    final seeds = winnableSeedsForDifficulty(_difficulty);
     if (seeds.isEmpty) {
       return DateTime.now().millisecondsSinceEpoch & 0x7fffffff;
     }
 
-    if (_difficulty == Difficulty.oneSuit) {
-      final used = AppServices.solvableSeedUsageRepo
-          .current()
-          .randomUsedSeeds1Suit;
-      for (var offset = 0; offset < seeds.length; offset++) {
-        final candidate = (_nextGuaranteedRandomIndex + offset) % seeds.length;
-        if (!used.contains(seeds[candidate])) {
-          _nextGuaranteedRandomIndex = (candidate + 1) % seeds.length;
-          return candidate;
-        }
+    final used = _usedSeedsForDifficulty(_difficulty);
+    var selected = _nextGuaranteedRandomIndex % seeds.length;
+
+    for (var offset = 0; offset < seeds.length; offset++) {
+      final candidate = (_nextGuaranteedRandomIndex + offset) % seeds.length;
+      if (!used.contains(seeds[candidate])) {
+        selected = candidate;
+        break;
       }
     }
 
-    final selected = _nextGuaranteedRandomIndex % seeds.length;
-    _nextGuaranteedRandomIndex =
-        (_nextGuaranteedRandomIndex + 1) % seeds.length;
+    if (advance) {
+      _nextGuaranteedRandomIndex = (selected + 1) % seeds.length;
+    }
     return selected;
   }
 
+  Set<int> _usedSeedsForDifficulty(Difficulty difficulty) {
+    final usage = AppServices.solvableSeedUsageRepo.current();
+    return switch (difficulty) {
+      Difficulty.oneSuit => <int>{
+        ...usage.dailyUsedSeeds1Suit,
+        ...usage.randomUsedSeeds1Suit,
+      },
+      Difficulty.twoSuit => <int>{},
+      Difficulty.fourSuit => <int>{},
+    };
+  }
+
+  int? _peekGuaranteedRandomSeed() {
+    if (!_hasGuaranteedRandomPool()) {
+      return null;
+    }
+    final index = _selectGuaranteedRandomIndex(advance: false);
+    return pickRandomSolvableSeed(difficulty: _difficulty, index: index);
+  }
+
   Future<void> _startRandomGuaranteed() async {
-    final index = _selectGuaranteedRandomIndex();
+    final index = _selectGuaranteedRandomIndex(advance: true);
     await _openPlay(
       PlayScreenArgs(
         difficulty: _difficulty,
         dealSource: RandomSolvableDealSource(index),
       ),
     );
+  }
+
+  Future<void> _openSolutionPreview({
+    required DealChoice deal,
+    required List<SolutionStepDto> steps,
+    required String title,
+    required bool fast,
+  }) {
+    return Navigator.of(context).pushNamed(
+      AppRoutes.solutionPreview,
+      arguments: SolutionPreviewArgs(
+        deal: deal,
+        steps: steps,
+        title: title,
+        fast: fast,
+      ),
+    );
+  }
+
+  int _dailySeedForDateKey(String dateKey) {
+    return pickDailySolvableSeed(difficulty: _difficulty, dateKey: dateKey);
+  }
+
+  List<SolutionStepDto>? _prefixForSeed(int seed) {
+    if (_difficulty != Difficulty.oneSuit) {
+      return null;
+    }
+    return verifiedSolutionPrefixForSeed1Suit(seed);
+  }
+
+  List<SolutionStepDto>? _fullForSeed(int seed) {
+    if (_difficulty != Difficulty.oneSuit) {
+      return null;
+    }
+    return verifiedFullSolutionForSeed1Suit(seed);
   }
 
   Future<void> _startRandomTotallyRandom() async {
@@ -192,12 +264,19 @@ class _HomeScreenState extends State<HomeScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
-            'Daily Deal not available yet (no verified solvable daily deals for this difficulty).',
+            'Daily Deal not available yet (no verified winnable deals for this difficulty).',
           ),
         ),
       );
       return Future<void>.value();
     }
+
+    final todayDateKey = toDateKeyLocal(DateTime.now());
+    final todaySeed = _dailySeedForDateKey(todayDateKey);
+    final todayPrefix = _prefixForSeed(todaySeed);
+    final todayFull = _fullForSeed(todaySeed);
+    final canPreviewToday = todayPrefix != null && todayPrefix.isNotEmpty;
+    final canShowFullToday = todayFull != null && todayFull.isNotEmpty;
 
     final rawDateKey = _resumeDaily == null
         ? null
@@ -222,6 +301,11 @@ class _HomeScreenState extends State<HomeScreen> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 const Text('Daily Deal', style: TextStyle(fontSize: 18)),
+                const SizedBox(height: 4),
+                Text(
+                  'Today seed: $todaySeed',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
                 const SizedBox(height: 8),
                 if (_resumeDaily != null)
                   FilledButton(
@@ -230,6 +314,62 @@ class _HomeScreenState extends State<HomeScreen> {
                       _resumeFromSave(_resumeDaily!);
                     },
                     child: Text(resumeLabel),
+                  ),
+                FilledButton.tonal(
+                  onPressed: canPreviewToday
+                      ? () {
+                          Navigator.of(context).pop();
+                          _openSolutionPreview(
+                            deal: DealChoice(
+                              difficulty: _difficulty,
+                              mode: DealChoiceMode.daily,
+                              guaranteed: true,
+                              seed: todaySeed,
+                              dateKey: todayDateKey,
+                            ),
+                            steps: todayPrefix,
+                            title: 'Preview First 30 Steps',
+                            fast: false,
+                          );
+                        }
+                      : null,
+                  child: const Text('Preview first 30 steps'),
+                ),
+                if (!canPreviewToday)
+                  const Padding(
+                    padding: EdgeInsets.only(top: 4),
+                    child: Text(
+                      'No solution prefix available for today\'s seed.',
+                      style: TextStyle(fontSize: 12, color: Colors.black54),
+                    ),
+                  ),
+                FilledButton.tonal(
+                  onPressed: canShowFullToday
+                      ? () {
+                          Navigator.of(context).pop();
+                          _openSolutionPreview(
+                            deal: DealChoice(
+                              difficulty: _difficulty,
+                              mode: DealChoiceMode.daily,
+                              guaranteed: true,
+                              seed: todaySeed,
+                              dateKey: todayDateKey,
+                            ),
+                            steps: todayFull,
+                            title: 'Show Full Proof (Fast)',
+                            fast: true,
+                          );
+                        }
+                      : null,
+                  child: const Text('Show full proof (fast)'),
+                ),
+                if (!canShowFullToday)
+                  const Padding(
+                    padding: EdgeInsets.only(top: 4),
+                    child: Text(
+                      'Full solution not available for this seed yet.',
+                      style: TextStyle(fontSize: 12, color: Colors.black54),
+                    ),
                   ),
                 OutlinedButton(
                   onPressed: () {
@@ -249,6 +389,23 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _openRandomSheet() {
+    final hasGuaranteed = _hasGuaranteedRandomPool();
+    final previewSeed = _peekGuaranteedRandomSeed();
+    final previewPrefix = previewSeed == null
+        ? null
+        : _prefixForSeed(previewSeed);
+    final previewFull = previewSeed == null ? null : _fullForSeed(previewSeed);
+    final canPreviewPrefix =
+        hasGuaranteed &&
+        previewSeed != null &&
+        previewPrefix != null &&
+        previewPrefix.isNotEmpty;
+    final canPreviewFull =
+        hasGuaranteed &&
+        previewSeed != null &&
+        previewFull != null &&
+        previewFull.isNotEmpty;
+
     return showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
@@ -272,7 +429,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     child: const Text('Resume Random'),
                   ),
                 FilledButton(
-                  onPressed: _hasGuaranteedRandomPool()
+                  onPressed: hasGuaranteed
                       ? () {
                           Navigator.of(context).pop();
                           _startRandomGuaranteed();
@@ -280,11 +437,73 @@ class _HomeScreenState extends State<HomeScreen> {
                       : null,
                   child: const Text('Play (Guaranteed winnable)'),
                 ),
-                if (!_hasGuaranteedRandomPool())
+                if (previewSeed != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text(
+                      'Guaranteed seed: $previewSeed',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ),
+                FilledButton.tonal(
+                  onPressed: canPreviewPrefix
+                      ? () {
+                          Navigator.of(context).pop();
+                          _openSolutionPreview(
+                            deal: DealChoice(
+                              difficulty: _difficulty,
+                              mode: DealChoiceMode.random,
+                              guaranteed: true,
+                              seed: previewSeed,
+                            ),
+                            steps: previewPrefix,
+                            title: 'Preview First 30 Steps',
+                            fast: false,
+                          );
+                        }
+                      : null,
+                  child: const Text('Preview first 30 steps'),
+                ),
+                FilledButton.tonal(
+                  onPressed: canPreviewFull
+                      ? () {
+                          Navigator.of(context).pop();
+                          _openSolutionPreview(
+                            deal: DealChoice(
+                              difficulty: _difficulty,
+                              mode: DealChoiceMode.random,
+                              guaranteed: true,
+                              seed: previewSeed,
+                            ),
+                            steps: previewFull,
+                            title: 'Show Full Proof (Fast)',
+                            fast: true,
+                          );
+                        }
+                      : null,
+                  child: const Text('Show full proof (fast)'),
+                ),
+                if (!hasGuaranteed)
                   const Padding(
                     padding: EdgeInsets.only(top: 6),
                     child: Text(
-                      'No verified solvable deals available yet.',
+                      'No verified winnable deals available yet.',
+                      style: TextStyle(fontSize: 12, color: Colors.black54),
+                    ),
+                  )
+                else if (!canPreviewPrefix)
+                  const Padding(
+                    padding: EdgeInsets.only(top: 6),
+                    child: Text(
+                      'No solution prefix available for current guaranteed seed.',
+                      style: TextStyle(fontSize: 12, color: Colors.black54),
+                    ),
+                  )
+                else if (!canPreviewFull)
+                  const Padding(
+                    padding: EdgeInsets.only(top: 6),
+                    child: Text(
+                      'Full solution not available for current guaranteed seed.',
                       style: TextStyle(fontSize: 12, color: Colors.black54),
                     ),
                   ),
@@ -402,7 +621,7 @@ class _HomeScreenState extends State<HomeScreen> {
         subtitle: _loadingSaves
             ? 'Loading saved games...'
             : (!dailyAvailable
-                  ? 'Daily Deal not available yet (no verified solvable daily deals for this difficulty).'
+                  ? 'Daily Deal not available yet (no verified winnable deals for this difficulty).'
                   : (_resumeDaily == null
                         ? 'Open calendar and pick a day.'
                         : 'Resume or open daily calendar.')),

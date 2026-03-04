@@ -35,11 +35,7 @@ class DailySolvableDealSource extends DealSource {
       return _hashDateKey(dateKeyLocal);
     }
 
-    if (difficulty == Difficulty.oneSuit) {
-      return pickDailySolvableSeed1Suit(dateKeyLocal);
-    }
-    final index = _hashDateKey(dateKeyLocal);
-    return pickSolvableSeed(difficulty: difficulty, index: index);
+    return pickDailySolvableSeed(difficulty: difficulty, dateKey: dateKeyLocal);
   }
 }
 
@@ -49,10 +45,7 @@ class RandomSolvableDealSource extends DealSource {
 
   @override
   int toSeed({required Difficulty difficulty}) {
-    if (difficulty == Difficulty.oneSuit) {
-      return pickRandomSolvableSeed1Suit(index);
-    }
-    return pickSolvableSeed(difficulty: difficulty, index: index);
+    return pickRandomSolvableSeed(difficulty: difficulty, index: index);
   }
 }
 

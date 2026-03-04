@@ -28,12 +28,27 @@ void main() {
     );
   });
 
+  test('unified winnable pool is deduped union of daily+random', () {
+    final expected = <int>{
+      ...verified.dailySolvableSeeds1Suit,
+      ...verified.randomSolvableSeeds1Suit,
+    };
+    final actual = verified
+        .verifiedWinnablePoolForDifficulty(Difficulty.oneSuit)
+        .toSet();
+    expect(actual, expected);
+  });
+
   test('ignore-verified override makes availability behave as empty', () {
     setIgnoreVerifiedSolvableData(true);
     addTearDown(() => setIgnoreVerifiedSolvableData(false));
 
     expect(hasDailySolvableSeeds(Difficulty.oneSuit), isFalse);
     expect(hasRandomSolvableSeeds(Difficulty.oneSuit), isFalse);
+    expect(
+      verified.verifiedWinnablePoolForDifficulty(Difficulty.oneSuit),
+      isEmpty,
+    );
     expect(verifiedSolutionPrefixForSeed1Suit(9), isNull);
     expect(verifiedFullSolutionForSeed1Suit(9), isNull);
   });
@@ -87,23 +102,18 @@ void main() {
 
   test('every 1-suit guaranteed seed has a solution prefix', () {
     final prefixKeys = solutionFirst30_1Suit.keys.toSet();
-
-    final missingDaily = verified.dailySolvableSeeds1Suit
-        .where((seed) => !prefixKeys.contains(seed))
-        .toList();
-    final missingRandom = verified.randomSolvableSeeds1Suit
-        .where((seed) => !prefixKeys.contains(seed))
-        .toList();
-
-    expect(
-      missingDaily,
-      isEmpty,
-      reason: 'daily 1-suit seeds missing prefix solutions: $missingDaily',
+    final unified = verified.verifiedWinnablePoolForDifficulty(
+      Difficulty.oneSuit,
     );
+
+    final missing = unified
+        .where((seed) => !prefixKeys.contains(seed))
+        .toList();
+
     expect(
-      missingRandom,
+      missing,
       isEmpty,
-      reason: 'random 1-suit seeds missing prefix solutions: $missingRandom',
+      reason: '1-suit verified seeds missing prefix solutions: $missing',
     );
   });
 }

@@ -12,31 +12,17 @@ class DailySolvableSeedPool {
 }
 
 // BEGIN GENERATED VERIFIED DATA
-const List<int> dailySolvableSeeds1Suit = <int>[
-  2,
-  29,
-];
+const List<int> dailySolvableSeeds1Suit = <int>[2, 29];
 
-const List<int> randomSolvableSeeds1Suit = <int>[
-  33,
-  38,
-];
+const List<int> randomSolvableSeeds1Suit = <int>[33, 38];
 
-const List<int> dailySolvableSeeds2Suit = <int>[
+const List<int> dailySolvableSeeds2Suit = <int>[];
 
-];
+const List<int> randomSolvableSeeds2Suit = <int>[];
 
-const List<int> randomSolvableSeeds2Suit = <int>[
+const List<int> dailySolvableSeeds4Suit = <int>[];
 
-];
-
-const List<int> dailySolvableSeeds4Suit = <int>[
-
-];
-
-const List<int> randomSolvableSeeds4Suit = <int>[
-
-];
+const List<int> randomSolvableSeeds4Suit = <int>[];
 // END GENERATED VERIFIED DATA
 
 // TODO(release): Once daily mapping is frozen, do not alter existing pool contents.
@@ -67,6 +53,18 @@ List<int> verifiedRandomSeedsForDifficulty(Difficulty difficulty) {
     Difficulty.twoSuit => randomSolvableSeeds2Suit,
     Difficulty.fourSuit => randomSolvableSeeds4Suit,
   };
+}
+
+List<int> verifiedWinnablePoolForDifficulty(Difficulty difficulty) {
+  if (ignoreVerifiedSolvableData) {
+    return const <int>[];
+  }
+
+  final merged = <int>{
+    ...verifiedDailySeedsForDifficulty(difficulty),
+    ...verifiedRandomSeedsForDifficulty(difficulty),
+  };
+  return List<int>.unmodifiable(merged);
 }
 
 List<DailySolvableSeedPool> verifiedDailyPoolsForDifficulty(

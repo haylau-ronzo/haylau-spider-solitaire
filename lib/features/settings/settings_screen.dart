@@ -1,5 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:package_info_plus/package_info_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../app/app_services.dart';
 import '../../game/model/difficulty.dart';
@@ -28,9 +30,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await applyOrientationLock(settings.orientationLock);
   }
 
-  Future<void> _showSolvableSeedCounts() {
+  Future<void> _showSolvableSeedCounts(SettingsModel settings) async {
     final usage = AppServices.solvableSeedUsageRepo.current();
     final summary = buildSolvableSeedCountsSummary(usage);
+
+    PackageInfo? packageInfo;
+    try {
+      packageInfo = await PackageInfo.fromPlatform();
+    } catch (_) {
+      packageInfo = null;
+    }
+
+    if (!mounted) {
+      return;
+    }
 
     return showDialog<void>(
       context: context,
@@ -42,10 +55,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Daily 1-suit: ${summary.daily1SuitUsed} / ${summary.daily1SuitTotal} used',
+                '1-suit: used ${summary.oneSuit.used} / ${summary.oneSuit.total}',
               ),
               const SizedBox(height: 6),
-              Text('Random 1-suit:  /  used'),
+              Text(
+                '2-suit: used ${summary.twoSuit.used} / ${summary.twoSuit.total}',
+              ),
+              const SizedBox(height: 6),
+              Text(
+                '4-suit: used ${summary.fourSuit.used} / ${summary.fourSuit.total}',
+              ),
               const SizedBox(height: 10),
               const Text(
                 'Used counts increment on win.',
@@ -55,6 +74,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           actions: [
             TextButton(
+              onPressed: () => _sendFeedbackEmail(
+                settings: settings,
+                summary: summary,
+                packageInfo: packageInfo,
+              ),
+              child: const Text('Send feedback'),
+            ),
+            TextButton(
               onPressed: () => Navigator.of(context).pop(),
               child: const Text('Close'),
             ),
@@ -62,6 +89,44 @@ class _SettingsScreenState extends State<SettingsScreen> {
         );
       },
     );
+  }
+
+  Future<void> _sendFeedbackEmail({
+    required SettingsModel settings,
+    required SolvableSeedCountsSummary summary,
+    required PackageInfo? packageInfo,
+  }) async {
+    final version = packageInfo == null
+        ? 'unknown'
+        : '${packageInfo.version}+${packageInfo.buildNumber}';
+    final body = StringBuffer()
+      ..writeln('App version: $version')
+      ..writeln('Difficulty: ${settings.difficulty.label}')
+      ..writeln(
+        '1-suit used/total: ${summary.oneSuit.used}/${summary.oneSuit.total}',
+      )
+      ..writeln(
+        '2-suit used/total: ${summary.twoSuit.used}/${summary.twoSuit.total}',
+      )
+      ..writeln(
+        '4-suit used/total: ${summary.fourSuit.used}/${summary.fourSuit.total}',
+      );
+
+    final uri = Uri(
+      scheme: 'mailto',
+      path: '',
+      queryParameters: <String, String>{
+        'subject': 'Spider Solitaire feedback',
+        'body': body.toString(),
+      },
+    );
+
+    final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!launched && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not open email app.')),
+      );
+    }
   }
 
   Future<void> _resetSolvableUsageAndCaches() async {
@@ -236,10 +301,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 subtitle: Text(
                   ignoreVerifiedSolvableData
                       ? 'Verified data ignored in debug mode.'
-                      : 'View daily/random solvable pool sizes.',
+                      : 'View verified winnable pool usage by difficulty.',
                 ),
                 trailing: const Icon(Icons.chevron_right),
-                onTap: _showSolvableSeedCounts,
+                onTap: () => _showSolvableSeedCounts(settings),
               ),
             ],
           );
