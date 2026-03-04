@@ -4,6 +4,7 @@ import 'dart:math';
 import 'package:haylau_spider_solitaire/game/actions/auto_complete_run_action.dart';
 import 'package:haylau_spider_solitaire/game/actions/deal_from_stock_action.dart';
 import 'package:haylau_spider_solitaire/game/actions/move_stack_action.dart';
+import 'package:haylau_spider_solitaire/game/engine/game_engine.dart';
 import 'package:haylau_spider_solitaire/game/engine/move_validator.dart';
 import 'package:haylau_spider_solitaire/game/model/card.dart';
 import 'package:haylau_spider_solitaire/game/model/deal_source.dart';
@@ -39,6 +40,7 @@ void main(List<String> args) {
   var solved = 0;
   var unsolved = 0;
   var timedOut = 0;
+  var rejectedInvalidSolutions = 0;
 
   while (dailySeeds.length < config.dailyCount) {
     attempts++;
@@ -46,19 +48,32 @@ void main(List<String> args) {
     final outcome = solver.solveSeed(currentSeed);
     final result = outcome.result;
 
-    if (result == _SolveResult.solvable && used.add(currentSeed)) {
-      dailySeeds.add(currentSeed);
-      solved++;
-      final full = outcome.solutionSteps;
-      prefixBySeed[currentSeed] = full
-          .take(config.solutionPrefixSteps)
-          .toList();
-      if (config.emitFullSolution) {
-        fullBySeed[currentSeed] = full;
-      }
-      stdout.writeln(
-        'Daily ${dailySeeds.length}/${config.dailyCount} <- $currentSeed',
+    if (result == _SolveResult.solvable) {
+      final replayError = _replayValidationError(
+        seed: currentSeed,
+        difficulty: Difficulty.oneSuit,
+        steps: outcome.solutionSteps,
       );
+      if (replayError != null) {
+        rejectedInvalidSolutions++;
+        unsolved++;
+        stdout.writeln(
+          'REJECT seed $currentSeed invalid solution: $replayError',
+        );
+      } else if (used.add(currentSeed)) {
+        dailySeeds.add(currentSeed);
+        solved++;
+        final full = outcome.solutionSteps;
+        prefixBySeed[currentSeed] = full
+            .take(config.solutionPrefixSteps)
+            .toList();
+        if (config.emitFullSolution) {
+          fullBySeed[currentSeed] = full;
+        }
+        stdout.writeln(
+          'Daily ${dailySeeds.length}/${config.dailyCount} <- $currentSeed',
+        );
+      }
     } else if (result == _SolveResult.timeout) {
       timedOut++;
     } else {
@@ -82,19 +97,32 @@ void main(List<String> args) {
     final outcome = solver.solveSeed(currentSeed);
     final result = outcome.result;
 
-    if (result == _SolveResult.solvable && used.add(currentSeed)) {
-      randomSeeds.add(currentSeed);
-      solved++;
-      final full = outcome.solutionSteps;
-      prefixBySeed[currentSeed] = full
-          .take(config.solutionPrefixSteps)
-          .toList();
-      if (config.emitFullSolution) {
-        fullBySeed[currentSeed] = full;
-      }
-      stdout.writeln(
-        'Random ${randomSeeds.length}/${config.randomCount} <- $currentSeed',
+    if (result == _SolveResult.solvable) {
+      final replayError = _replayValidationError(
+        seed: currentSeed,
+        difficulty: Difficulty.oneSuit,
+        steps: outcome.solutionSteps,
       );
+      if (replayError != null) {
+        rejectedInvalidSolutions++;
+        unsolved++;
+        stdout.writeln(
+          'REJECT seed $currentSeed invalid solution: $replayError',
+        );
+      } else if (used.add(currentSeed)) {
+        randomSeeds.add(currentSeed);
+        solved++;
+        final full = outcome.solutionSteps;
+        prefixBySeed[currentSeed] = full
+            .take(config.solutionPrefixSteps)
+            .toList();
+        if (config.emitFullSolution) {
+          fullBySeed[currentSeed] = full;
+        }
+        stdout.writeln(
+          'Random ${randomSeeds.length}/${config.randomCount} <- $currentSeed',
+        );
+      }
     } else if (result == _SolveResult.timeout) {
       timedOut++;
     } else {
@@ -134,7 +162,7 @@ void main(List<String> args) {
   );
   stdout.writeln('Wrote solutions to ${config.solutionsOutPath}');
   stdout.writeln(
-    'Attempts: $attempts, solved: $solved, unsolved: $unsolved, timed out: $timedOut',
+    'Attempts: $attempts, solved: $solved, unsolved: $unsolved, timed out: $timedOut, rejectedInvalidSolutions: $rejectedInvalidSolutions',
   );
 }
 
@@ -873,4 +901,71 @@ class _Node {
   final int depth;
   final int? parentIndex;
   final SolutionStepDto? stepFromParent;
+}
+
+String? _replayValidationError({
+  required int seed,
+  required Difficulty difficulty,
+  required List<SolutionStepDto> steps,
+}) {
+  final engine = GameEngine();
+  engine.newGame(difficulty: difficulty, dealSource: RandomDealSource(seed));
+
+  for (var i = 0; i < steps.length; i++) {
+    final step = steps[i];
+
+    if (step.isDeal) {
+      if (!engine.dealFromStock()) {
+        return 'step ${i + 1}: dealFromStock rejected';
+      }
+      continue;
+    }
+
+    if (!step.isMove ||
+        step.fromColumn == null ||
+        step.toColumn == null ||
+        step.startIndex == null) {
+      return 'step ${i + 1}: invalid move dto';
+    }
+
+    if (step.movedLength != null) {
+      final run = engine.getEffectiveMoveRun(
+        step.fromColumn!,
+        step.startIndex!,
+      );
+      if (run == null) {
+        return 'step ${i + 1}: no legal run at from=${step.fromColumn} '
+            'start=${step.startIndex}';
+      }
+      if (run.length != step.movedLength) {
+        return 'step ${i + 1}: movedLength mismatch expected=${step.movedLength} '
+            'actual=${run.length}';
+      }
+    }
+
+    final moved = engine.moveStack(
+      step.fromColumn!,
+      step.startIndex!,
+      step.toColumn!,
+    );
+    if (!moved) {
+      final run = engine.getEffectiveMoveRun(
+        step.fromColumn!,
+        step.startIndex!,
+      );
+      var dropReason = 'run invalid';
+      if (run != null) {
+        final firstCard = engine
+            .state
+            .tableau
+            .columns[step.fromColumn!][run.effectiveStartIndex];
+        dropReason =
+            engine.canDropRun(step.toColumn!, firstCard).reason ?? 'unknown';
+      }
+      return 'step ${i + 1}: moveStack rejected from=${step.fromColumn} '
+          'to=${step.toColumn} start=${step.startIndex} reason=$dropReason';
+    }
+  }
+
+  return null;
 }
