@@ -42,7 +42,7 @@ class _SolutionPreviewScreenState extends State<SolutionPreviewScreen> {
   int _pendingSingleSteps = 0;
   int _stepIndex = 0;
   String _stepDescription = '';
-  bool? _currentStepIsDeal;
+  SolutionStepKind? _currentStepKind;
   Completer<void>? _runWaiter;
 
   Duration get _stepDelay => widget.args.fast
@@ -130,25 +130,29 @@ class _SolutionPreviewScreenState extends State<SolutionPreviewScreen> {
     final start = step.startIndex!;
     final state = _engine.state;
     if (from < 0 || from >= state.tableau.columns.length) {
-      return 'from column out of range: ';
+      return 'from column out of range: $from';
     }
     if (to < 0 || to >= state.tableau.columns.length) {
-      return 'to column out of range: ';
+      return 'to column out of range: $to';
     }
 
     final run = _engine.getEffectiveMoveRun(from, start);
     if (run == null) {
-      return 'no legal run at from= start=';
+      return 'no legal run at from=$from start=$start';
+    }
+
+    if (step.movedLength != null && run.length != step.movedLength) {
+      return 'movedLength mismatch expected=${step.movedLength} actual=${run.length}';
     }
 
     final source = state.tableau.columns[from];
     final firstCard = source[run.effectiveStartIndex];
     final drop = _engine.canDropRun(to, firstCard);
     if (!drop.isValid) {
-      return 'drop invalid from= to= start=';
+      return 'drop invalid from=$from to=$to start=$start';
     }
 
-    return 'engine rejected move from= to= start=';
+    return 'engine rejected move from=$from to=$to start=$start';
   }
 
   String _stateFingerprint() {
@@ -179,6 +183,17 @@ class _SolutionPreviewScreenState extends State<SolutionPreviewScreen> {
           step.startIndex == null) {
         return false;
       }
+
+      if (step.movedLength != null) {
+        final run = _engine.getEffectiveMoveRun(
+          step.fromColumn!,
+          step.startIndex!,
+        );
+        if (run == null || run.length != step.movedLength) {
+          return false;
+        }
+      }
+
       applied = _engine.moveStack(
         step.fromColumn!,
         step.startIndex!,
@@ -223,20 +238,32 @@ class _SolutionPreviewScreenState extends State<SolutionPreviewScreen> {
       }
 
       final step = steps[i];
+      if (kDebugMode) {
+        debugPrint(
+          'Solution preview step seed=${widget.args.deal.seed} '
+          'stepIndex=${i + 1}/${steps.length} kind=${step.kind.name}',
+        );
+      }
       final description = _describeSolutionStep(step);
+      setState(() {
+        _currentStepKind = step.kind;
+      });
       final ok = _applyStep(step);
       if (!ok) {
         final reason = _explainInvalidStep(step);
+        final failureLabel = step.isMove ? 'MOVE failed' : 'DEAL failed';
         if (kDebugMode) {
           debugPrint(
-            'Solution preview invalid step ${i + 1}: $description :: $reason',
+            'Solution preview $failureLabel at step ${i + 1}: '
+            '$description :: $reason',
           );
         }
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(
-                'Preview stopped at step ${i + 1}: $description ($reason)',
+                'Preview stopped at step ${i + 1}: $failureLabel '
+                '($description) - $reason',
               ),
             ),
           );
@@ -250,7 +277,6 @@ class _SolutionPreviewScreenState extends State<SolutionPreviewScreen> {
       setState(() {
         _stepIndex = i + 1;
         _stepDescription = description;
-        _currentStepIsDeal = step.isDeal;
       });
 
       await SchedulerBinding.instance.endOfFrame;
@@ -365,7 +391,7 @@ class _SolutionPreviewScreenState extends State<SolutionPreviewScreen> {
                     if (kDebugMode) ...[
                       const SizedBox(height: 4),
                       Text(
-                        'DEV stepType: ${_currentStepIsDeal == null ? 'n/a' : (_currentStepIsDeal! ? 'deal' : 'move')}',
+                        'DEV dtoKind: ${_currentStepKind?.name ?? 'n/a'}',
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
                     ],

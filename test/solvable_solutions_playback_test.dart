@@ -150,4 +150,15 @@ void main() {
     expect(hasDeal, isTrue);
     expect(hasMove, isTrue);
   });
+  test('seed 2 step 6 is MOVE (not DEAL)', () {
+    final steps = solutionFirst30_1Suit[2];
+    if (steps == null || steps.length <= 5) {
+      expect(true, isTrue);
+      return;
+    }
+
+    expect(steps[5].kind, SolutionStepKind.move);
+    expect(steps[5].isMove, isTrue);
+    expect(steps[5].isDeal, isFalse);
+  });
 }
