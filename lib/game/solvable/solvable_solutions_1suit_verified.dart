@@ -1,3 +1,4 @@
+// ignore_for_file: unnecessary_const
 import 'solvable_solution_step.dart';
 import 'verified_solvable_data_override.dart';
 
@@ -156,3 +157,6 @@ List<SolutionStepDto>? verifiedFullSolutionForSeed1Suit(int seed) {
   }
   return solutionFull_1Suit[seed];
 }
+
+
+
