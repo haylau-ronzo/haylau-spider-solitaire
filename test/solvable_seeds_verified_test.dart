@@ -4,6 +4,8 @@ import 'package:haylau_spider_solitaire/game/solvable/solvable_seeds.dart';
 import 'package:haylau_spider_solitaire/game/solvable/solvable_seeds_verified.dart'
     as verified;
 import 'package:haylau_spider_solitaire/game/solvable/solvable_solutions_1suit_verified.dart';
+import 'package:haylau_spider_solitaire/game/solvable/solvable_solutions_2suit_verified.dart';
+import 'package:haylau_spider_solitaire/game/solvable/solvable_solutions_4suit_verified.dart';
 import 'package:haylau_spider_solitaire/game/solvable/verified_solvable_data_override.dart';
 
 void main() {
@@ -114,6 +116,38 @@ void main() {
       missing,
       isEmpty,
       reason: '1-suit verified seeds missing prefix solutions: $missing',
+    );
+  });
+
+  test('every 2-suit verified seed has a full proof entry', () {
+    final unified = verified.verifiedWinnablePoolForDifficulty(
+      Difficulty.twoSuit,
+    );
+
+    final missing = unified
+        .where((seed) => solutionFull_2Suit[seed] == null)
+        .toList();
+
+    expect(
+      missing,
+      isEmpty,
+      reason: '2-suit verified seeds missing full proofs: ',
+    );
+  });
+
+  test('every 4-suit verified seed has a full proof entry', () {
+    final unified = verified.verifiedWinnablePoolForDifficulty(
+      Difficulty.fourSuit,
+    );
+
+    final missing = unified
+        .where((seed) => solutionFull_4Suit[seed] == null)
+        .toList();
+
+    expect(
+      missing,
+      isEmpty,
+      reason: '4-suit verified seeds missing full proofs: ',
     );
   });
 }

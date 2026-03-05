@@ -6,15 +6,24 @@ void main(List<String> args) {
     return;
   }
 
+  final spec = _DifficultySpec.fromArg(
+    _stringArg(args, name: 'difficulty', fallback: 'one'),
+  );
+  if (spec == null) {
+    stderr.writeln('ERROR: --difficulty must be one|two|four');
+    exitCode = 2;
+    return;
+  }
+
   final generatedPath = _stringArg(
     args,
     name: 'generated',
-    fallback: 'tool/tmp_generated_solutions_1suit.dart',
+    fallback: spec.generatedFallback,
   );
   final targetPath = _stringArg(
     args,
     name: 'target',
-    fallback: 'lib/game/solvable/solvable_solutions_1suit_verified.dart',
+    fallback: spec.targetFallback,
   );
   final apply = args.contains('--apply');
 
@@ -39,11 +48,8 @@ void main(List<String> args) {
   late final _MapBlock targetFull;
 
   try {
-    targetPrefix = _extractRequiredMapBlock(
-      targetSource,
-      'solutionFirst30_1Suit',
-    );
-    targetFull = _extractRequiredMapBlock(targetSource, 'solutionFull_1Suit');
+    targetPrefix = _extractRequiredMapBlock(targetSource, spec.prefixMapName);
+    targetFull = _extractRequiredMapBlock(targetSource, spec.fullMapName);
   } on FormatException catch (e) {
     stderr.writeln('ERROR: ${e.message}');
     exitCode = 2;
@@ -52,11 +58,11 @@ void main(List<String> args) {
 
   final generatedPrefix = _extractOptionalMapBlock(
     generatedSource,
-    'solutionFirst30_1Suit',
+    spec.prefixMapName,
   );
   final generatedFull = _extractOptionalMapBlock(
     generatedSource,
-    'solutionFull_1Suit',
+    spec.fullMapName,
   );
 
   final generatedPrefixEntries = generatedPrefix == null
@@ -75,8 +81,8 @@ void main(List<String> args) {
     generatedEntries: generatedFullEntries,
   );
 
-  _printReport('solutionFirst30_1Suit', prefixResult);
-  _printReport('solutionFull_1Suit', fullResult);
+  _printReport(spec.prefixMapName, prefixResult);
+  _printReport(spec.fullMapName, fullResult);
 
   final changed =
       prefixResult.addedSeeds.isNotEmpty || fullResult.addedSeeds.isNotEmpty;
@@ -109,6 +115,48 @@ void main(List<String> args) {
   }
 
   stdout.writeln('Applied merge to: $targetPath');
+}
+
+class _DifficultySpec {
+  const _DifficultySpec({
+    required this.prefixMapName,
+    required this.fullMapName,
+    required this.generatedFallback,
+    required this.targetFallback,
+  });
+
+  final String prefixMapName;
+  final String fullMapName;
+  final String generatedFallback;
+  final String targetFallback;
+
+  static _DifficultySpec? fromArg(String value) {
+    final normalized = value.trim().toLowerCase();
+    return switch (normalized) {
+      'one' => const _DifficultySpec(
+        prefixMapName: 'solutionFirst30_1Suit',
+        fullMapName: 'solutionFull_1Suit',
+        generatedFallback: 'tool/tmp_generated_solutions_1suit.dart',
+        targetFallback:
+            'lib/game/solvable/solvable_solutions_1suit_verified.dart',
+      ),
+      'two' => const _DifficultySpec(
+        prefixMapName: 'solutionFirst30_2Suit',
+        fullMapName: 'solutionFull_2Suit',
+        generatedFallback: 'tool/tmp_generated_solutions_2suit.dart',
+        targetFallback:
+            'lib/game/solvable/solvable_solutions_2suit_verified.dart',
+      ),
+      'four' => const _DifficultySpec(
+        prefixMapName: 'solutionFirst30_4Suit',
+        fullMapName: 'solutionFull_4Suit',
+        generatedFallback: 'tool/tmp_generated_solutions_4suit.dart',
+        targetFallback:
+            'lib/game/solvable/solvable_solutions_4suit_verified.dart',
+      ),
+      _ => null,
+    };
+  }
 }
 
 class _MapBlock {
@@ -210,7 +258,6 @@ Map<int, String> _extractEntriesInOrder(String mapBody) {
     final entryRaw = mapBody.substring(entryStart, entryEnd).trimRight();
     final normalized = entryRaw.endsWith(',') ? entryRaw : '$entryRaw,';
 
-    // Keep first entry if malformed source repeats a seed key.
     result.putIfAbsent(seed, () => normalized);
   }
 
@@ -303,10 +350,17 @@ String _usage() => '''Usage:
   dart run tool/merge_solvable_solutions.dart [options]
 
 Options:
-  --generated=<path>  Generated solutions file.
-                      Default: tool/tmp_generated_solutions_1suit.dart
-  --target=<path>     Verified solutions file.
-                      Default: lib/game/solvable/solvable_solutions_1suit_verified.dart
-  --apply             Apply changes. Without this, dry-run only.
-  --help, -h          Show this help.
+  --difficulty=one|two|four  Difficulty map set to merge. Default: one
+  --generated=<path>         Generated solutions file.
+                             Default by difficulty:
+                               one:  tool/tmp_generated_solutions_1suit.dart
+                               two:  tool/tmp_generated_solutions_2suit.dart
+                               four: tool/tmp_generated_solutions_4suit.dart
+  --target=<path>            Verified solutions file.
+                             Default by difficulty:
+                               one:  lib/game/solvable/solvable_solutions_1suit_verified.dart
+                               two:  lib/game/solvable/solvable_solutions_2suit_verified.dart
+                               four: lib/game/solvable/solvable_solutions_4suit_verified.dart
+  --apply                    Apply changes. Without this, dry-run only.
+  --help, -h                 Show this help.
 ''';

@@ -11,77 +11,148 @@ void main(List<String> args) {
     name: 'seeds',
     fallback: 'lib/game/solvable/solvable_seeds_verified.dart',
   );
-  final solutionsPath = _stringArg(
-    args,
-    name: 'solutions',
-    fallback: 'lib/game/solvable/solvable_solutions_1suit_verified.dart',
-  );
   final apply = args.contains('--apply');
 
-  final seedsFile = File(seedsPath);
-  final solutionsFile = File(solutionsPath);
+  final legacySolutions1 = _stringArgOrNull(args, name: 'solutions');
+  final solutionPaths = <String, String>{
+    '1-suit': _stringArg(
+      args,
+      name: 'solutions-1',
+      fallback:
+          legacySolutions1 ??
+          'lib/game/solvable/solvable_solutions_1suit_verified.dart',
+    ),
+    '2-suit': _stringArg(
+      args,
+      name: 'solutions-2',
+      fallback: 'lib/game/solvable/solvable_solutions_2suit_verified.dart',
+    ),
+    '4-suit': _stringArg(
+      args,
+      name: 'solutions-4',
+      fallback: 'lib/game/solvable/solvable_solutions_4suit_verified.dart',
+    ),
+  };
 
+  final seedsFile = File(seedsPath);
   if (!seedsFile.existsSync()) {
     stderr.writeln('ERROR: seeds file not found: $seedsPath');
     exitCode = 2;
     return;
   }
-  if (!solutionsFile.existsSync()) {
-    stderr.writeln('ERROR: solutions file not found: $solutionsPath');
-    exitCode = 2;
-    return;
-  }
 
   final seedsSource = seedsFile.readAsStringSync();
-  final solutionsSource = solutionsFile.readAsStringSync();
 
-  late final List<int> dailySeeds;
-  late final List<int> randomSeeds;
-  late final Set<int> solutionKeys;
+  final specs = <_PruneSpec>[
+    const _PruneSpec(
+      label: '1-suit',
+      dailyListName: 'dailySolvableSeeds1Suit',
+      randomListName: 'randomSolvableSeeds1Suit',
+      fullMapName: 'solutionFull_1Suit',
+    ),
+    const _PruneSpec(
+      label: '2-suit',
+      dailyListName: 'dailySolvableSeeds2Suit',
+      randomListName: 'randomSolvableSeeds2Suit',
+      fullMapName: 'solutionFull_2Suit',
+    ),
+    const _PruneSpec(
+      label: '4-suit',
+      dailyListName: 'dailySolvableSeeds4Suit',
+      randomListName: 'randomSolvableSeeds4Suit',
+      fullMapName: 'solutionFull_4Suit',
+    ),
+  ];
+
+  final results = <_PruneResult>[];
+
   try {
-    dailySeeds = _extractIntList(seedsSource, 'dailySolvableSeeds1Suit');
-    randomSeeds = _extractIntList(seedsSource, 'randomSolvableSeeds1Suit');
-    final prefixMapBody = _extractMapBody(
-      solutionsSource,
-      'solutionFirst30_1Suit',
-    );
-    solutionKeys = _extractMapKeys(prefixMapBody);
+    for (final spec in specs) {
+      final dailySeeds = _extractIntList(seedsSource, spec.dailyListName);
+      final randomSeeds = _extractIntList(seedsSource, spec.randomListName);
+
+      final solutionsPath = solutionPaths[spec.label]!;
+      final solutionsFile = File(solutionsPath);
+      if (!solutionsFile.existsSync()) {
+        stdout.writeln(
+          'WARN: ${spec.label} solutions file missing: $solutionsPath (skipping prune)',
+        );
+        results.add(
+          _PruneResult.skipped(
+            spec: spec,
+            dailyBefore: dailySeeds,
+            randomBefore: randomSeeds,
+          ),
+        );
+        continue;
+      }
+
+      final solutionsSource = solutionsFile.readAsStringSync();
+      final fullMapBody = _extractMapBody(solutionsSource, spec.fullMapName);
+      final solutionKeys = _extractMapKeys(fullMapBody);
+
+      final filteredDaily = dailySeeds.where(solutionKeys.contains).toList();
+      final filteredRandom = randomSeeds.where(solutionKeys.contains).toList();
+
+      final removedDaily = dailySeeds
+          .where((seed) => !solutionKeys.contains(seed))
+          .toList();
+      final removedRandom = randomSeeds
+          .where((seed) => !solutionKeys.contains(seed))
+          .toList();
+
+      results.add(
+        _PruneResult(
+          spec: spec,
+          skipped: false,
+          dailyBefore: dailySeeds,
+          randomBefore: randomSeeds,
+          dailyAfter: filteredDaily,
+          randomAfter: filteredRandom,
+          removedDaily: removedDaily,
+          removedRandom: removedRandom,
+        ),
+      );
+    }
   } on FormatException catch (e) {
     stderr.writeln('ERROR: ${e.message}');
     exitCode = 2;
     return;
   }
 
-  final filteredDaily = dailySeeds.where(solutionKeys.contains).toList();
-  final filteredRandom = randomSeeds.where(solutionKeys.contains).toList();
-
-  final removedDaily = dailySeeds
-      .where((s) => !solutionKeys.contains(s))
-      .toList();
-  final removedRandom = randomSeeds
-      .where((s) => !solutionKeys.contains(s))
-      .toList();
-
-  stdout.writeln('Prune report (1-suit):');
-  stdout.writeln(
-    '  daily before/after: ${dailySeeds.length}/${filteredDaily.length}',
-  );
-  stdout.writeln(
-    '  random before/after: ${randomSeeds.length}/${filteredRandom.length}',
-  );
-  stdout.writeln('  removed daily (${removedDaily.length}): $removedDaily');
-  stdout.writeln('  removed random (${removedRandom.length}): $removedRandom');
-
-  if (filteredDaily.isEmpty) {
-    stdout.writeln('WARN: dailySolvableSeeds1Suit becomes empty.');
+  for (final result in results) {
+    stdout.writeln('Prune report (${result.spec.label}):');
+    if (result.skipped) {
+      stdout.writeln('  skipped (missing solution file)');
+      continue;
+    }
+    stdout.writeln(
+      '  daily before/after: ${result.dailyBefore.length}/${result.dailyAfter.length}',
+    );
+    stdout.writeln(
+      '  random before/after: ${result.randomBefore.length}/${result.randomAfter.length}',
+    );
+    stdout.writeln(
+      '  removed daily (${result.removedDaily.length}): ${result.removedDaily}',
+    );
+    stdout.writeln(
+      '  removed random (${result.removedRandom.length}): ${result.removedRandom}',
+    );
+    if (result.dailyAfter.isEmpty) {
+      stdout.writeln('  WARN: ${result.spec.dailyListName} becomes empty.');
+    }
+    if (result.randomAfter.isEmpty) {
+      stdout.writeln('  WARN: ${result.spec.randomListName} becomes empty.');
+    }
   }
-  if (filteredRandom.isEmpty) {
-    stdout.writeln('WARN: randomSolvableSeeds1Suit becomes empty.');
-  }
 
-  final changed =
-      filteredDaily.length != dailySeeds.length ||
-      filteredRandom.length != randomSeeds.length;
+  final changed = results.any((result) {
+    if (result.skipped) {
+      return false;
+    }
+    return result.dailyBefore.length != result.dailyAfter.length ||
+        result.randomBefore.length != result.randomAfter.length;
+  });
 
   if (!changed) {
     stdout.writeln('No changes.');
@@ -94,16 +165,21 @@ void main(List<String> args) {
   }
 
   var updatedSource = seedsSource;
-  updatedSource = _replaceIntList(
-    updatedSource,
-    'dailySolvableSeeds1Suit',
-    filteredDaily,
-  );
-  updatedSource = _replaceIntList(
-    updatedSource,
-    'randomSolvableSeeds1Suit',
-    filteredRandom,
-  );
+  for (final result in results) {
+    if (result.skipped) {
+      continue;
+    }
+    updatedSource = _replaceIntList(
+      updatedSource,
+      result.spec.dailyListName,
+      result.dailyAfter,
+    );
+    updatedSource = _replaceIntList(
+      updatedSource,
+      result.spec.randomListName,
+      result.randomAfter,
+    );
+  }
 
   try {
     seedsFile.writeAsStringSync(updatedSource);
@@ -116,17 +192,86 @@ void main(List<String> args) {
   stdout.writeln('Applied pruning to: $seedsPath');
 }
 
+class _PruneSpec {
+  const _PruneSpec({
+    required this.label,
+    required this.dailyListName,
+    required this.randomListName,
+    required this.fullMapName,
+  });
+
+  final String label;
+  final String dailyListName;
+  final String randomListName;
+  final String fullMapName;
+}
+
+class _PruneResult {
+  const _PruneResult({
+    required this.spec,
+    required this.skipped,
+    required this.dailyBefore,
+    required this.randomBefore,
+    required this.dailyAfter,
+    required this.randomAfter,
+    required this.removedDaily,
+    required this.removedRandom,
+  });
+
+  factory _PruneResult.skipped({
+    required _PruneSpec spec,
+    required List<int> dailyBefore,
+    required List<int> randomBefore,
+  }) {
+    return _PruneResult(
+      spec: spec,
+      skipped: true,
+      dailyBefore: dailyBefore,
+      randomBefore: randomBefore,
+      dailyAfter: dailyBefore,
+      randomAfter: randomBefore,
+      removedDaily: const <int>[],
+      removedRandom: const <int>[],
+    );
+  }
+
+  final _PruneSpec spec;
+  final bool skipped;
+  final List<int> dailyBefore;
+  final List<int> randomBefore;
+  final List<int> dailyAfter;
+  final List<int> randomAfter;
+  final List<int> removedDaily;
+  final List<int> removedRandom;
+}
+
 String _usage() => '''Usage:
   dart run tool/prune_seeds_without_solutions.dart [options]
 
 Options:
-  --seeds=<path>      Verified seeds file.
-                      Default: lib/game/solvable/solvable_seeds_verified.dart
-  --solutions=<path>  Verified solutions file.
-                      Default: lib/game/solvable/solvable_solutions_1suit_verified.dart
-  --apply             Apply pruning. Without this, dry-run only.
-  --help, -h          Show this help.
+  --seeds=<path>        Verified seeds file.
+                        Default: lib/game/solvable/solvable_seeds_verified.dart
+  --solutions-1=<path>  1-suit verified solutions file.
+                        Default: lib/game/solvable/solvable_solutions_1suit_verified.dart
+  --solutions-2=<path>  2-suit verified solutions file.
+                        Default: lib/game/solvable/solvable_solutions_2suit_verified.dart
+  --solutions-4=<path>  4-suit verified solutions file.
+                        Default: lib/game/solvable/solvable_solutions_4suit_verified.dart
+  --apply               Apply pruning. Without this, dry-run only.
+  --help, -h            Show this help.
 ''';
+
+String? _stringArgOrNull(List<String> args, {required String name}) {
+  final prefix = '--$name=';
+  final raw = args.cast<String?>().firstWhere(
+    (arg) => arg != null && arg.startsWith(prefix),
+    orElse: () => null,
+  );
+  if (raw == null) {
+    return null;
+  }
+  return raw.substring(prefix.length);
+}
 
 String _stringArg(
   List<String> args, {
