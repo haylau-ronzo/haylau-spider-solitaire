@@ -5,6 +5,8 @@ import 'package:haylau_spider_solitaire/game/model/difficulty.dart';
 import 'package:haylau_spider_solitaire/game/solvable/solvable_seeds.dart';
 import 'package:haylau_spider_solitaire/game/solvable/solvable_solution_step.dart';
 import 'package:haylau_spider_solitaire/game/solvable/solvable_solutions_1suit_verified.dart';
+import 'package:haylau_spider_solitaire/game/solvable/solvable_solutions_2suit_verified.dart';
+import 'package:haylau_spider_solitaire/game/solvable/solvable_solutions_4suit_verified.dart';
 import 'package:haylau_spider_solitaire/game/solvable/solution_step_replayer.dart';
 import 'package:haylau_spider_solitaire/game/solvable/verified_solvable_data_override.dart';
 
@@ -16,6 +18,29 @@ void main() {
     }
     engine.restoreState(result.nextState);
     return true;
+  }
+
+  List<SolutionStepDto>? fullProofForDifficulty(
+    Difficulty difficulty,
+    int seed,
+  ) {
+    return switch (difficulty) {
+      Difficulty.oneSuit => solutionFull_1Suit[seed],
+      Difficulty.twoSuit => solutionFull_2Suit[seed],
+      Difficulty.fourSuit => solutionFull_4Suit[seed],
+    };
+  }
+
+  String fullProofDiagnostics({
+    required int seed,
+    required Difficulty difficulty,
+    required bool finalWinState,
+    required int proofLength,
+    required String stopReason,
+  }) {
+    return 'seed=$seed difficulty=${difficulty.name} '
+        'finalWin=$finalWinState proofLength=$proofLength '
+        'stopReason=$stopReason';
   }
 
   test('ignore-verified override hides solution maps at read API', () {
@@ -142,6 +167,142 @@ void main() {
       }
     },
   );
+  test(
+    'every verified two-suit seed has a strict full-solution proof that wins',
+    () {
+      final verifiedSeeds = winnableSeedsForDifficulty(Difficulty.twoSuit);
+
+      for (final seed in verifiedSeeds) {
+        final full = fullProofForDifficulty(Difficulty.twoSuit, seed);
+        expect(
+          full,
+          isNotNull,
+          reason: 'verified two-suit seed $seed is missing full proof steps',
+        );
+        expect(
+          full,
+          isNotEmpty,
+          reason: 'verified two-suit seed $seed has empty full proof steps',
+        );
+
+        final engine = GameEngine();
+        engine.newGame(
+          difficulty: Difficulty.twoSuit,
+          dealSource: RandomDealSource(seed),
+        );
+
+        var stopReason = 'none';
+        for (var i = 0; i < full!.length; i++) {
+          final step = full[i];
+          final result = applyStrictSolutionStep(
+            state: engine.state,
+            step: step,
+          );
+          if (!result.applied) {
+            stopReason =
+                'step=${i + 1} kind=${step.kind.name} reason=${result.reason}';
+          }
+          expect(
+            result.applied,
+            isTrue,
+            reason: fullProofDiagnostics(
+              seed: seed,
+              difficulty: Difficulty.twoSuit,
+              finalWinState: engine.isWon,
+              proofLength: full.length,
+              stopReason: stopReason,
+            ),
+          );
+          engine.restoreState(result.nextState);
+        }
+
+        final finalWin = engine.isWon;
+        if (!finalWin) {
+          stopReason = 'reached-end-without-win';
+        }
+        expect(
+          finalWin,
+          isTrue,
+          reason: fullProofDiagnostics(
+            seed: seed,
+            difficulty: Difficulty.twoSuit,
+            finalWinState: finalWin,
+            proofLength: full.length,
+            stopReason: stopReason,
+          ),
+        );
+      }
+    },
+  );
+
+  test(
+    'every verified four-suit seed has a strict full-solution proof that wins',
+    () {
+      final verifiedSeeds = winnableSeedsForDifficulty(Difficulty.fourSuit);
+
+      for (final seed in verifiedSeeds) {
+        final full = fullProofForDifficulty(Difficulty.fourSuit, seed);
+        expect(
+          full,
+          isNotNull,
+          reason: 'verified four-suit seed $seed is missing full proof steps',
+        );
+        expect(
+          full,
+          isNotEmpty,
+          reason: 'verified four-suit seed $seed has empty full proof steps',
+        );
+
+        final engine = GameEngine();
+        engine.newGame(
+          difficulty: Difficulty.fourSuit,
+          dealSource: RandomDealSource(seed),
+        );
+
+        var stopReason = 'none';
+        for (var i = 0; i < full!.length; i++) {
+          final step = full[i];
+          final result = applyStrictSolutionStep(
+            state: engine.state,
+            step: step,
+          );
+          if (!result.applied) {
+            stopReason =
+                'step=${i + 1} kind=${step.kind.name} reason=${result.reason}';
+          }
+          expect(
+            result.applied,
+            isTrue,
+            reason: fullProofDiagnostics(
+              seed: seed,
+              difficulty: Difficulty.fourSuit,
+              finalWinState: engine.isWon,
+              proofLength: full.length,
+              stopReason: stopReason,
+            ),
+          );
+          engine.restoreState(result.nextState);
+        }
+
+        final finalWin = engine.isWon;
+        if (!finalWin) {
+          stopReason = 'reached-end-without-win';
+        }
+        expect(
+          finalWin,
+          isTrue,
+          reason: fullProofDiagnostics(
+            seed: seed,
+            difficulty: Difficulty.fourSuit,
+            finalWinState: finalWin,
+            proofLength: full.length,
+            stopReason: stopReason,
+          ),
+        );
+      }
+    },
+  );
+
   test('seed 9 full solution reaches win when fixture is present', () {
     final steps = solutionFull_1Suit[9];
     if (steps == null || steps.isEmpty) {

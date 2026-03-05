@@ -886,7 +886,7 @@ class _FourSuitSeedSolver {
     );
   }
 
-  bool _isWon(GameState state) => state.foundations.completedRuns >= 1;
+  bool _isWon(GameState state) => state.foundations.completedRuns >= 8;
 
   int _stateScore(GameState state) {
     final faceUpCount = state.tableau.columns

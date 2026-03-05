@@ -1,4 +1,7 @@
 import '../model/difficulty.dart';
+import 'solvable_solutions_1suit_verified.dart';
+import 'solvable_solutions_2suit_verified.dart';
+import 'solvable_solutions_4suit_verified.dart';
 import 'verified_solvable_data_override.dart';
 
 class DailySolvableSeedPool {
@@ -12,17 +15,27 @@ class DailySolvableSeedPool {
 }
 
 // BEGIN GENERATED VERIFIED DATA
-const List<int> dailySolvableSeeds1Suit = <int>[2, 29];
+const List<int> dailySolvableSeeds1Suit = <int>[
+  2,
+  29,
+];
 
-const List<int> randomSolvableSeeds1Suit = <int>[33, 38];
+const List<int> randomSolvableSeeds1Suit = <int>[
+  33,
+  38,
+];
 
 const List<int> dailySolvableSeeds2Suit = <int>[];
 
 const List<int> randomSolvableSeeds2Suit = <int>[];
 
-const List<int> dailySolvableSeeds4Suit = <int>[];
+const List<int> dailySolvableSeeds4Suit = <int>[
 
-const List<int> randomSolvableSeeds4Suit = <int>[];
+];
+
+const List<int> randomSolvableSeeds4Suit = <int>[
+
+];
 // END GENERATED VERIFIED DATA
 
 // TODO(release): Once daily mapping is frozen, do not alter existing pool contents.
@@ -64,7 +77,10 @@ List<int> verifiedWinnablePoolForDifficulty(Difficulty difficulty) {
     ...verifiedDailySeedsForDifficulty(difficulty),
     ...verifiedRandomSeedsForDifficulty(difficulty),
   };
-  return List<int>.unmodifiable(merged);
+  final withProofsOnly = merged
+      .where((seed) => hasVerifiedFullSolutionForSeed(difficulty, seed))
+      .toList(growable: false);
+  return List<int>.unmodifiable(withProofsOnly);
 }
 
 List<DailySolvableSeedPool> verifiedDailyPoolsForDifficulty(
@@ -79,3 +95,12 @@ List<DailySolvableSeedPool> verifiedDailyPoolsForDifficulty(
     Difficulty.fourSuit => dailyPools4Suit,
   };
 }
+
+bool hasVerifiedFullSolutionForSeed(Difficulty difficulty, int seed) {
+  return switch (difficulty) {
+    Difficulty.oneSuit => verifiedFullSolutionForSeed1Suit(seed) != null,
+    Difficulty.twoSuit => verifiedFullSolutionForSeed2Suit(seed) != null,
+    Difficulty.fourSuit => verifiedFullSolutionForSeed4Suit(seed) != null,
+  };
+}
+

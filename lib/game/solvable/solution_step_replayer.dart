@@ -123,5 +123,9 @@ String? strictReplayValidationError({
     state = result.nextState;
   }
 
+  if (state.foundations.completedRuns < 8) {
+    return 'final state is not a win (completedRuns=${state.foundations.completedRuns})';
+  }
+
   return null;
 }
