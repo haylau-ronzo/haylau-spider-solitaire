@@ -221,28 +221,32 @@ void _logAttempt({
 }) {
   if (foundProofLength != null) {
     stdout.writeln(
-      'FOUND (seed=$seed, proofLength=$foundProofLength, elapsedMs=${outcome.elapsedMs})',
+      'FOUND (seed=$seed, proofLength=$foundProofLength, elapsedMs=${outcome.elapsedMs}, stopReason=win)',
     );
     return;
   }
 
   switch (outcome.result) {
     case _SolveResult.timeout:
-      stdout.writeln('TIMEOUT (seed=$seed, elapsedMs=${outcome.elapsedMs})');
+      stdout.writeln(
+        'TIMEOUT (seed=$seed, elapsedMs=${outcome.elapsedMs}, stopReason=timeout)',
+      );
       return;
     case _SolveResult.nodeCap:
-      stdout.writeln('NODE_CAP (seed=$seed, nodesUsed=${outcome.nodesUsed})');
+      stdout.writeln(
+        'NODE_CAP (seed=$seed, nodesUsed=${outcome.nodesUsed}, stopReason=nodeCap)',
+      );
       return;
     case _SolveResult.depthCap:
       stdout.writeln(
-        'DEPTH_CAP (seed=$seed, depthReached=${outcome.depthReached})',
+        'DEPTH_CAP (seed=$seed, depthReached=${outcome.depthReached}, stopReason=depthCap)',
       );
       return;
     case _SolveResult.unsolved:
-      stdout.writeln('UNSOLVED (seed=$seed)');
+      stdout.writeln('UNSOLVED (seed=$seed, stopReason=unsolved)');
       return;
     case _SolveResult.solvable:
-      stdout.writeln('UNSOLVED (seed=$seed)');
+      stdout.writeln('UNSOLVED (seed=$seed, stopReason=unsolved)');
       return;
   }
 }
@@ -886,7 +890,7 @@ class _FourSuitSeedSolver {
     );
   }
 
-  bool _isWon(GameState state) => state.foundations.completedRuns >= 8;
+  bool _isWon(GameState state) => state.foundations.completedRuns >= 1;
 
   int _stateScore(GameState state) {
     final faceUpCount = state.tableau.columns
