@@ -1,0 +1,135 @@
+name: Seed Pool Generation
+
+on:
+  workflow_dispatch:
+    inputs:
+      suits:
+        description: "Difficulty to generate"
+        type: choice
+        required: true
+        default: two
+        options:
+          - two
+          - four
+      seed_start:
+        description: "Starting seed"
+        type: number
+        required: true
+        default: 1
+      scan_attempts:
+        description: "Seeds to scan"
+        type: number
+        required: true
+        default: 5000
+      scan_ms:
+        description: "Scan budget per seed (ms)"
+        type: number
+        required: true
+        default: 500
+      top_k:
+        description: "Top candidates to prove"
+        type: number
+        required: true
+        default: 50
+      prove_ms:
+        description: "Prove budget per seed (ms)"
+        type: number
+        required: true
+        default: 120000
+
+permissions:
+  contents: write
+
+jobs:
+  seedgen:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Flutter pub get
+        run: flutter pub get
+
+      - name: Generate 2-suit (auto)
+        if: ${{ inputs.suits == 'two' }}
+        run: |
+          dart run tool/generate_solvable_seeds_2suit.dart \
+            --mode=auto \
+            --seed-start=${{ inputs.seed_start }} \
+            --max-attempts=${{ inputs.scan_attempts }} \
+            --scan-ms=${{ inputs.scan_ms }} \
+            --top-k=${{ inputs.top_k }} \
+            --per-seed-ms=${{ inputs.prove_ms }} \
+            --candidate-file=tool/tmp_candidate_seeds_2suit.txt \
+            --out=tool/tmp_generated_seeds_2suit.dart \
+            --solutions-out=tool/tmp_generated_solutions_2suit.dart
+
+      - name: Generate 4-suit (auto)
+        if: ${{ inputs.suits == 'four' }}
+        run: |
+          dart run tool/generate_solvable_seeds_4suit.dart \
+            --mode=auto \
+            --seed-start=${{ inputs.seed_start }} \
+            --max-attempts=${{ inputs.scan_attempts }} \
+            --scan-ms=${{ inputs.scan_ms }} \
+            --top-k=${{ inputs.top_k }} \
+            --per-seed-ms=${{ inputs.prove_ms }} \
+            --candidate-file=tool/tmp_candidate_seeds_4suit.txt \
+            --out=tool/tmp_generated_seeds_4suit.dart \
+            --solutions-out=tool/tmp_generated_solutions_4suit.dart
+
+      - name: Merge seeds (2-suit)
+        if: ${{ inputs.suits == 'two' }}
+        run: dart run tool/merge_solvable_seeds.dart --generated=tool/tmp_generated_seeds_2suit.dart --apply
+
+      - name: Merge seeds (4-suit)
+        if: ${{ inputs.suits == 'four' }}
+        run: dart run tool/merge_solvable_seeds.dart --generated=tool/tmp_generated_seeds_4suit.dart --apply
+
+      - name: Merge solutions (2-suit)
+        if: ${{ inputs.suits == 'two' }}
+        run: dart run tool/merge_solvable_solutions.dart --difficulty=two --generated=tool/tmp_generated_solutions_2suit.dart --apply
+
+      - name: Merge solutions (4-suit)
+        if: ${{ inputs.suits == 'four' }}
+        run: dart run tool/merge_solvable_solutions.dart --difficulty=four --generated=tool/tmp_generated_solutions_4suit.dart --apply
+
+      - name: Prune seeds without solutions
+        run: dart run tool/prune_seeds_without_solutions.dart --apply
+
+      - name: Analyze
+        run: dart analyze
+
+      - name: Test
+        run: flutter test
+
+      - name: Commit and push verified pool updates
+        env:
+          SUITS: ${{ inputs.suits }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Only stage verified pool sources we expect to change
+          git add \
+            lib/game/solvable/solvable_seeds_verified.dart \
+            lib/game/solvable/solvable_solutions_2suit_verified.dart \
+            lib/game/solvable/solvable_solutions_4suit_verified.dart
+
+          if git diff --cached --quiet; then
+            echo "No verified pool changes to commit."
+            exit 0
+          fi
+
+          git commit -m "ci(seedgen): update verified solvable pools ($SUITS)"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
