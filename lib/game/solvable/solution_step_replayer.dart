@@ -124,8 +124,18 @@ String? strictReplayValidationError({
   }
 
   if (state.foundations.completedRuns < 8) {
-    return 'final state is not a win (completedRuns=${state.foundations.completedRuns})';
+    return 'final state is not a win (${_endStateSummary(state)})';
   }
 
   return null;
+}
+
+String _endStateSummary(GameState state) {
+  final stockRemaining = state.stock.cards.length;
+  final faceDownCards = state.tableau.columns
+      .expand((column) => column)
+      .where((card) => !card.faceUp)
+      .length;
+  return 'completedRuns=${state.foundations.completedRuns}, '
+      'stockRemaining=$stockRemaining, faceDownCards=$faceDownCards, moves=${state.moves}';
 }

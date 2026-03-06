@@ -15,14 +15,58 @@ void main(List<String> args) {
   }
 
   final config = _GeneratorConfig.fromArgs(args);
+
+  List<_ScanCandidate> scanCandidates = const <_ScanCandidate>[];
+  if (config.mode == _GeneratorMode.scan ||
+      config.mode == _GeneratorMode.auto) {
+    final scanSolver = _TwoSuitSeedSolver(
+      perSeedMs: config.scanMs,
+      nodeCap: config.scanNodeCap ?? config.nodeCap,
+      maxDepth: config.scanDepth ?? config.maxDepth,
+      randomWalkTrials: config.randomWalkTrials,
+      randomWalkSteps: config.randomWalkSteps,
+      searchMode: config.searchMode,
+      beamWidth: config.beamWidth,
+      dealPolicy: config.dealPolicy,
+      instrumentationEveryNodes: config.instrumentationEveryNodes,
+      instrumentationEveryMs: config.instrumentationEveryMs,
+    );
+    scanCandidates = _runScanPhase(config, scanSolver);
+    final ranked = _rankCandidates(scanCandidates);
+    _writeCandidateFile(config.candidateFilePath, ranked);
+    _logScanPercentiles(ranked);
+    if (config.mode == _GeneratorMode.scan) {
+      return;
+    }
+  }
+
+  final proveSeeds = config.mode == _GeneratorMode.auto
+      ? _rankCandidates(
+          scanCandidates,
+        ).take(config.topK).map((c) => c.seed).toList(growable: false)
+      : _candidateSeedsForProve(config);
+
   final solver = _TwoSuitSeedSolver(
     perSeedMs: config.perSeedMs,
     nodeCap: config.nodeCap,
     maxDepth: config.maxDepth,
     randomWalkTrials: config.randomWalkTrials,
     randomWalkSteps: config.randomWalkSteps,
+    searchMode: config.searchMode,
+    beamWidth: config.beamWidth,
+    dealPolicy: config.dealPolicy,
+    instrumentationEveryNodes: config.instrumentationEveryNodes,
+    instrumentationEveryMs: config.instrumentationEveryMs,
   );
 
+  _runProvePhase(config, solver, proveSeeds);
+}
+
+void _runProvePhase(
+  _GeneratorConfig config,
+  _TwoSuitSeedSolver solver,
+  List<int> proveSeeds,
+) {
   final dailySeeds = <int>[];
   final randomSeeds = <int>[];
   final used = <int>{};
@@ -30,24 +74,25 @@ void main(List<String> args) {
   final prefixBySeed = <int, List<SolutionStepDto>>{};
   final fullBySeed = <int, List<SolutionStepDto>>{};
 
-  var candidate = config.seedStart;
   var attempts = 0;
   var solved = 0;
   var unsolved = 0;
   var timedOut = 0;
   var rejectedInvalidSolutions = 0;
+  final stopReasonCounts = <String, int>{};
 
-  while (_canEvaluateCandidate(
-        config: config,
-        attempts: attempts,
-        seed: candidate,
-      ) &&
-      dailySeeds.length < config.dailyCount) {
+  final watch = Stopwatch()..start();
+  for (final currentSeed in proveSeeds) {
+    if (dailySeeds.length >= config.dailyCount &&
+        randomSeeds.length >= config.randomCount) {
+      break;
+    }
+
     attempts++;
-    final currentSeed = candidate;
     final outcome = solver.solveSeed(currentSeed);
     final result = outcome.result;
     int? foundProofLength;
+    var replayRejected = false;
 
     if (result == _SolveResult.solvable) {
       final verifiedProof = List<SolutionStepDto>.unmodifiable(
@@ -59,13 +104,13 @@ void main(List<String> args) {
         steps: verifiedProof,
       );
       if (replayError != null) {
+        replayRejected = true;
         rejectedInvalidSolutions++;
         unsolved++;
         stdout.writeln(
           'REJECT seed $currentSeed invalid solution: $replayError',
         );
       } else if (used.add(currentSeed)) {
-        dailySeeds.add(currentSeed);
         solved++;
         foundProofLength = verifiedProof.length;
         final full = verifiedProof;
@@ -75,15 +120,31 @@ void main(List<String> args) {
         if (config.emitFullSolution) {
           fullBySeed[currentSeed] = full;
         }
-        stdout.writeln(
-          'Daily ${dailySeeds.length}/${config.dailyCount} <- $currentSeed',
-        );
+
+        if (dailySeeds.length < config.dailyCount) {
+          dailySeeds.add(currentSeed);
+          stdout.writeln(
+            'Daily ${dailySeeds.length}/${config.dailyCount} <- $currentSeed',
+          );
+        } else if (randomSeeds.length < config.randomCount) {
+          randomSeeds.add(currentSeed);
+          stdout.writeln(
+            'Random ${randomSeeds.length}/${config.randomCount} <- $currentSeed',
+          );
+        }
       }
     } else if (result == _SolveResult.timeout) {
       timedOut++;
     } else {
       unsolved++;
     }
+
+    final stopReason = _stopReasonLabel(
+      outcome: outcome,
+      foundProof: foundProofLength != null,
+      replayRejected: replayRejected,
+    );
+    stopReasonCounts[stopReason] = (stopReasonCounts[stopReason] ?? 0) + 1;
 
     _logAttempt(
       seed: currentSeed,
@@ -98,74 +159,12 @@ void main(List<String> args) {
       randomFound: randomSeeds.length,
       timedOut: timedOut,
       currentSeed: currentSeed,
+      stopReasonCounts: stopReasonCounts,
     );
-    candidate++;
   }
 
-  while (_canEvaluateCandidate(
-        config: config,
-        attempts: attempts,
-        seed: candidate,
-      ) &&
-      randomSeeds.length < config.randomCount) {
-    attempts++;
-    final currentSeed = candidate;
-    final outcome = solver.solveSeed(currentSeed);
-    final result = outcome.result;
-    int? foundProofLength;
-
-    if (result == _SolveResult.solvable) {
-      final verifiedProof = List<SolutionStepDto>.unmodifiable(
-        outcome.solutionSteps,
-      );
-      final replayError = _replayValidationError(
-        seed: currentSeed,
-        difficulty: Difficulty.twoSuit,
-        steps: verifiedProof,
-      );
-      if (replayError != null) {
-        rejectedInvalidSolutions++;
-        unsolved++;
-        stdout.writeln(
-          'REJECT seed $currentSeed invalid solution: $replayError',
-        );
-      } else if (used.add(currentSeed)) {
-        randomSeeds.add(currentSeed);
-        solved++;
-        foundProofLength = verifiedProof.length;
-        final full = verifiedProof;
-        prefixBySeed[currentSeed] = full
-            .take(config.solutionPrefixSteps)
-            .toList();
-        if (config.emitFullSolution) {
-          fullBySeed[currentSeed] = full;
-        }
-        stdout.writeln(
-          'Random ${randomSeeds.length}/${config.randomCount} <- $currentSeed',
-        );
-      }
-    } else if (result == _SolveResult.timeout) {
-      timedOut++;
-    } else {
-      unsolved++;
-    }
-
-    _logAttempt(
-      seed: currentSeed,
-      outcome: outcome,
-      foundProofLength: foundProofLength,
-    );
-
-    _logProgress(
-      progressEvery: config.progressEvery,
-      attempts: attempts,
-      dailyFound: dailySeeds.length,
-      randomFound: randomSeeds.length,
-      timedOut: timedOut,
-      currentSeed: currentSeed,
-    );
-    candidate++;
-  }
+  final elapsedHours = max(1, watch.elapsedMilliseconds) / (1000 * 60 * 60);
+  final winsPerHour = solved / elapsedHours;
 
   final seedsOutput = _renderSeedsOutput(
     dailySeeds: dailySeeds,
@@ -191,13 +190,208 @@ void main(List<String> args) {
   stdout.writeln(
     'Attempts: $attempts, solved: $solved, unsolved: $unsolved, timed out: $timedOut, rejectedInvalidSolutions: $rejectedInvalidSolutions',
   );
+  stdout.writeln('Prove summary winsPerHour=${winsPerHour.toStringAsFixed(2)}');
   _logLimitStopIfNeeded(
     config: config,
     attempts: attempts,
-    nextSeed: candidate,
+    nextSeed: proveSeeds.isEmpty ? config.seedStart : proveSeeds.last + 1,
     dailyFound: dailySeeds.length,
     randomFound: randomSeeds.length,
   );
+}
+
+List<_ScanCandidate> _runScanPhase(
+  _GeneratorConfig config,
+  _TwoSuitSeedSolver solver,
+) {
+  final candidates = <_ScanCandidate>[];
+  var attempts = 0;
+  var seed = config.seedStart;
+
+  while (_canEvaluateCandidate(
+    config: config,
+    attempts: attempts,
+    seed: seed,
+  )) {
+    attempts++;
+    solver.solveSeed(seed);
+    candidates.add(
+      _ScanCandidate(
+        seed: seed,
+        score: solver.lastBestScoreSoFar,
+        lowestFaceDown: solver.lastLowestFaceDownSeen,
+        completedRuns: solver.lastBestCompletedRunsReached,
+        depth: solver.lastDepthReached,
+        nodes: solver.lastNodesExpanded,
+      ),
+    );
+
+    if (config.progressEvery > 0 && attempts % config.progressEvery == 0) {
+      stdout.writeln(
+        'SCAN progress attempts=$attempts currentSeed=$seed '
+        'bestScore=${solver.lastBestScoreSoFar} lowestFaceDown=${solver.lastLowestFaceDownSeen}',
+      );
+    }
+    seed++;
+  }
+
+  stdout.writeln('SCAN completed seeds=${candidates.length}');
+  return candidates;
+}
+
+List<_ScanCandidate> _rankCandidates(List<_ScanCandidate> values) {
+  final ranked = values.toList(growable: false);
+  ranked.sort((a, b) {
+    final byFaceDown = a.lowestFaceDown.compareTo(b.lowestFaceDown);
+    if (byFaceDown != 0) {
+      return byFaceDown;
+    }
+    final byRuns = b.completedRuns.compareTo(a.completedRuns);
+    if (byRuns != 0) {
+      return byRuns;
+    }
+    final byScore = b.score.compareTo(a.score);
+    if (byScore != 0) {
+      return byScore;
+    }
+    final byDepth = b.depth.compareTo(a.depth);
+    if (byDepth != 0) {
+      return byDepth;
+    }
+    return a.seed.compareTo(b.seed);
+  });
+  return ranked;
+}
+
+void _writeCandidateFile(String path, List<_ScanCandidate> ranked) {
+  final file = File(path);
+  file.parent.createSync(recursive: true);
+  final lines = <String>[
+    'seed,score,lowestFaceDown,completedRuns,depth,nodes',
+    ...ranked.map(
+      (c) =>
+          '${c.seed},${c.score},${c.lowestFaceDown},${c.completedRuns},${c.depth},${c.nodes}',
+    ),
+  ];
+  file.writeAsStringSync('${lines.join('\n')}\n');
+  stdout.writeln('Wrote candidate seeds to $path (${ranked.length} rows)');
+}
+
+List<int> _candidateSeedsForProve(_GeneratorConfig config) {
+  final fromFile = _readCandidateFile(config.candidateFilePath);
+  if (fromFile.isNotEmpty) {
+    return fromFile
+        .take(config.topK)
+        .map((c) => c.seed)
+        .toList(growable: false);
+  }
+
+  final seeds = <int>[];
+  var attempts = 0;
+  var seed = config.seedStart;
+  while (_canEvaluateCandidate(
+    config: config,
+    attempts: attempts,
+    seed: seed,
+  )) {
+    attempts++;
+    seeds.add(seed);
+    seed++;
+  }
+  return seeds;
+}
+
+List<_ScanCandidate> _readCandidateFile(String path) {
+  final file = File(path);
+  if (!file.existsSync()) {
+    stdout.writeln('Candidate file not found: $path');
+    return const <_ScanCandidate>[];
+  }
+
+  final lines = file
+      .readAsLinesSync()
+      .map((line) => line.trim())
+      .where((line) => line.isNotEmpty)
+      .toList(growable: false);
+  if (lines.isEmpty) {
+    return const <_ScanCandidate>[];
+  }
+
+  final parsed = <_ScanCandidate>[];
+  for (var i = 1; i < lines.length; i++) {
+    final parts = lines[i].split(',');
+    if (parts.length < 6) {
+      continue;
+    }
+    final seed = int.tryParse(parts[0]);
+    final score = int.tryParse(parts[1]);
+    final lowestFaceDown = int.tryParse(parts[2]);
+    final completedRuns = int.tryParse(parts[3]);
+    final depth = int.tryParse(parts[4]);
+    final nodes = int.tryParse(parts[5]);
+    if (seed == null ||
+        score == null ||
+        lowestFaceDown == null ||
+        completedRuns == null ||
+        depth == null ||
+        nodes == null) {
+      continue;
+    }
+    parsed.add(
+      _ScanCandidate(
+        seed: seed,
+        score: score,
+        lowestFaceDown: lowestFaceDown,
+        completedRuns: completedRuns,
+        depth: depth,
+        nodes: nodes,
+      ),
+    );
+  }
+
+  return _rankCandidates(parsed);
+}
+
+void _logScanPercentiles(List<_ScanCandidate> ranked) {
+  if (ranked.isEmpty) {
+    stdout.writeln('SCAN percentiles unavailable (no candidates).');
+    return;
+  }
+
+  final scores = ranked.map((c) => c.score).toList()..sort();
+  final lows = ranked.map((c) => c.lowestFaceDown).toList()..sort();
+
+  int percentileValue(List<int> sorted, double pct) {
+    final idx = ((sorted.length - 1) * pct).round().clamp(0, sorted.length - 1);
+    return sorted[idx];
+  }
+
+  stdout.writeln(
+    'SCAN percentiles score p10=${percentileValue(scores, 0.10)} '
+    'p50=${percentileValue(scores, 0.50)} p90=${percentileValue(scores, 0.90)}',
+  );
+  stdout.writeln(
+    'SCAN percentiles lowestFaceDown p10=${percentileValue(lows, 0.10)} '
+    'p50=${percentileValue(lows, 0.50)} p90=${percentileValue(lows, 0.90)}',
+  );
+}
+
+class _ScanCandidate {
+  const _ScanCandidate({
+    required this.seed,
+    required this.score,
+    required this.lowestFaceDown,
+    required this.completedRuns,
+    required this.depth,
+    required this.nodes,
+  });
+
+  final int seed;
+  final int score;
+  final int lowestFaceDown;
+  final int completedRuns;
+  final int depth;
+  final int nodes;
 }
 
 bool _canEvaluateCandidate({
@@ -258,6 +452,7 @@ void _logProgress({
   required int randomFound,
   required int timedOut,
   required int currentSeed,
+  required Map<String, int> stopReasonCounts,
 }) {
   if (progressEvery > 0 && attempts % progressEvery == 0) {
     stdout.writeln(
@@ -265,11 +460,38 @@ void _logProgress({
     );
   }
   if (attempts % 50 == 0) {
+    final topStopReasons = stopReasonCounts.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+    final topSummary = topStopReasons
+        .take(3)
+        .map((entry) => '${entry.key}=${entry.value}')
+        .join(', ');
     stdout.writeln(
       'Heartbeat attempts=$attempts, dailyFound=$dailyFound, '
-      'randomFound=$randomFound, timedOut=$timedOut, currentSeed=$currentSeed',
+      'randomFound=$randomFound, timedOut=$timedOut, currentSeed=$currentSeed, '
+      'topStopReasons=[$topSummary]',
     );
   }
+}
+
+String _stopReasonLabel({
+  required _SolveOutcome outcome,
+  required bool foundProof,
+  required bool replayRejected,
+}) {
+  if (foundProof) {
+    return 'found';
+  }
+  if (replayRejected) {
+    return 'replayReject';
+  }
+  return switch (outcome.result) {
+    _SolveResult.timeout => 'timeout',
+    _SolveResult.nodeCap => 'nodeCap',
+    _SolveResult.depthCap => 'depthCap',
+    _SolveResult.unsolved => 'unsolved',
+    _SolveResult.solvable => 'unsolved',
+  };
 }
 
 void _logLimitStopIfNeeded({
@@ -373,6 +595,17 @@ class _GeneratorConfig {
     required this.solutionPrefixSteps,
     required this.emitFullSolution,
     required this.progressEvery,
+    required this.searchMode,
+    required this.beamWidth,
+    required this.dealPolicy,
+    required this.instrumentationEveryNodes,
+    required this.instrumentationEveryMs,
+    required this.mode,
+    required this.topK,
+    required this.candidateFilePath,
+    required this.scanMs,
+    required this.scanNodeCap,
+    required this.scanDepth,
   });
 
   final int dailyCount;
@@ -390,6 +623,17 @@ class _GeneratorConfig {
   final int solutionPrefixSteps;
   final bool emitFullSolution;
   final int progressEvery;
+  final _SearchMode searchMode;
+  final int beamWidth;
+  final _DealPolicy dealPolicy;
+  final int instrumentationEveryNodes;
+  final int instrumentationEveryMs;
+  final _GeneratorMode mode;
+  final int topK;
+  final String candidateFilePath;
+  final int scanMs;
+  final int? scanNodeCap;
+  final int? scanDepth;
 
   static bool wantsHelp(List<String> args) =>
       args.contains('--help') || args.contains('-h');
@@ -450,6 +694,25 @@ class _GeneratorConfig {
       return raw.substring(prefix.length);
     }
 
+    _GeneratorMode modeArg() {
+      final raw = stringArg('mode', 'prove').toLowerCase();
+      return switch (raw) {
+        'scan' => _GeneratorMode.scan,
+        'auto' => _GeneratorMode.auto,
+        _ => _GeneratorMode.prove,
+      };
+    }
+
+    _SearchMode searchModeArg() {
+      final raw = stringArg('search', 'dfs').toLowerCase();
+      return raw == 'beam' ? _SearchMode.beam : _SearchMode.dfs;
+    }
+
+    _DealPolicy dealPolicyArg() {
+      final raw = stringArg('deal-policy', 'smart').toLowerCase();
+      return raw == 'always' ? _DealPolicy.always : _DealPolicy.smart;
+    }
+
     return _GeneratorConfig(
       dailyCount: intArg('daily-count', 10),
       randomCount: intArg('random-count', 20),
@@ -469,6 +732,23 @@ class _GeneratorConfig {
       solutionPrefixSteps: intArg('solution-prefix-steps', 30),
       emitFullSolution: boolArg('emit-full-solution', false),
       progressEvery: max(1, intArg('progress-every', 1)),
+      searchMode: searchModeArg(),
+      beamWidth: max(20, intArg('beam-width', 200)),
+      dealPolicy: dealPolicyArg(),
+      instrumentationEveryNodes: max(
+        0,
+        intArg('instrumentation-every-nodes', 5000),
+      ),
+      instrumentationEveryMs: max(0, intArg('instrumentation-every-ms', 2000)),
+      mode: modeArg(),
+      topK: max(1, intArg('top-k', 200)),
+      candidateFilePath: stringArg(
+        'candidate-file',
+        'tool/tmp_candidate_seeds_2suit.txt',
+      ),
+      scanMs: max(1, intArg('scan-ms', 2000)),
+      scanNodeCap: nullableIntArg('scan-node-cap'),
+      scanDepth: nullableIntArg('scan-depth'),
     );
   }
 
@@ -490,11 +770,28 @@ Options:
   --random-walk-steps=<int>      RW steps (default: 700)
   --solution-prefix-steps=<int>  Prefix length to emit (default: 30)
   --emit-full-solution=<bool>    Emit full map too (default: false)
+  --mode=scan|prove|auto         Phase mode (default: prove)
+  --top-k=<int>                  Top ranked candidates to prove (default: 200)
+  --candidate-file=<path>        Candidate CSV path (default: tool/tmp_candidate_seeds_2suit.txt)
+  --scan-ms=<int>                Per-seed scan budget in ms (default: 2000)
+  --scan-node-cap=<int>          Optional scan node cap (default: use --node-cap)
+  --scan-depth=<int>             Optional scan depth cap (default: use --max-depth)
   --progress-every=<int>         Print progress every N attempts (default: 1)
+  --search=dfs|beam              Search mode (default: dfs)
+  --beam-width=<int>             Beam width for --search=beam (default: 200)
+  --deal-policy=smart|always     Deal heuristic policy (default: smart)
+  --instrumentation-every-nodes=<int>  Search metrics print interval by nodes (default: 5000)
+  --instrumentation-every-ms=<int>     Search metrics print interval by ms (default: 2000)
 ''';
 }
 
 enum _SolveResult { solvable, unsolved, timeout, nodeCap, depthCap }
+
+enum _GeneratorMode { scan, prove, auto }
+
+enum _SearchMode { dfs, beam }
+
+enum _DealPolicy { smart, always }
 
 class _SolveOutcome {
   const _SolveOutcome({
@@ -526,6 +823,11 @@ class _TwoSuitSeedSolver {
     required this.maxDepth,
     required this.randomWalkTrials,
     required this.randomWalkSteps,
+    required this.searchMode,
+    required this.beamWidth,
+    required this.dealPolicy,
+    required this.instrumentationEveryNodes,
+    required this.instrumentationEveryMs,
   });
 
   final int perSeedMs;
@@ -533,15 +835,34 @@ class _TwoSuitSeedSolver {
   final int maxDepth;
   final int randomWalkTrials;
   final int randomWalkSteps;
+  final _SearchMode searchMode;
+  final int beamWidth;
+  final _DealPolicy dealPolicy;
+  final int instrumentationEveryNodes;
+  final int instrumentationEveryMs;
+
+  int lastBestScoreSoFar = -1 << 30;
+  int lastLowestFaceDownSeen = 1 << 30;
+  int lastBestCompletedRunsReached = 0;
+  int lastDepthReached = 0;
+  int lastNodesExpanded = 0;
 
   final MoveValidator _validator = const MoveValidator();
 
   _SolveOutcome solveSeed(int seed) {
     final watch = Stopwatch()..start();
     final initial = _initialStateForSeed(seed);
+    final initialScore = _stateScore(initial);
+    lastBestScoreSoFar = initialScore;
+    lastLowestFaceDownSeen = _faceDownCount(initial);
+    lastBestCompletedRunsReached = initial.foundations.completedRuns;
+    lastDepthReached = 0;
+    lastNodesExpanded = 0;
 
     final greedy = _tryGreedyWithPath(initial, maxSteps: 500);
     if (greedy != null) {
+      lastBestCompletedRunsReached = 8;
+      lastDepthReached = greedy.length;
       return _SolveOutcome(
         result: _SolveResult.solvable,
         solutionSteps: greedy,
@@ -553,6 +874,8 @@ class _TwoSuitSeedSolver {
 
     final randomWalk = _tryRandomWalkWithPath(initial, seed, watch);
     if (randomWalk != null) {
+      lastBestCompletedRunsReached = 8;
+      lastDepthReached = randomWalk.length;
       return _SolveOutcome(
         result: _SolveResult.solvable,
         solutionSteps: randomWalk,
@@ -572,7 +895,9 @@ class _TwoSuitSeedSolver {
       );
     }
 
-    return _searchWithPath(initial, watch);
+    return searchMode == _SearchMode.beam
+        ? _searchWithBeam(initial, watch)
+        : _searchWithPath(initial, watch);
   }
 
   List<SolutionStepDto>? _tryGreedyWithPath(
@@ -682,13 +1007,18 @@ class _TwoSuitSeedSolver {
       _Node(state: start, depth: 0, parentIndex: null, stepFromParent: null),
     ];
     final stack = <int>[0];
-    final bestSeen = <String, int>{};
+    final bestSeen = <int, _SeenState>{};
 
     var explored = 0;
     var maxDepthReached = 0;
     var hitDepthCap = false;
+    var bestScoreSoFar = _stateScore(start);
+    var lowestFaceDownSeen = _faceDownCount(start);
+    var lastLogMs = 0;
     while (stack.isNotEmpty) {
       if (watch.elapsedMilliseconds >= perSeedMs) {
+        lastNodesExpanded = explored;
+        lastDepthReached = maxDepthReached;
         return _SolveOutcome(
           result: _SolveResult.timeout,
           solutionSteps: const <SolutionStepDto>[],
@@ -698,6 +1028,8 @@ class _TwoSuitSeedSolver {
         );
       }
       if (explored >= nodeCap) {
+        lastNodesExpanded = explored;
+        lastDepthReached = maxDepthReached;
         return _SolveOutcome(
           result: _SolveResult.nodeCap,
           solutionSteps: const <SolutionStepDto>[],
@@ -711,8 +1043,22 @@ class _TwoSuitSeedSolver {
       final node = nodes[nodeIndex];
       explored++;
       maxDepthReached = max(maxDepthReached, node.depth);
+      final score = _stateScore(node.state);
+      bestScoreSoFar = max(bestScoreSoFar, score);
+      lowestFaceDownSeen = min(lowestFaceDownSeen, _faceDownCount(node.state));
+      lastBestScoreSoFar = bestScoreSoFar;
+      lastLowestFaceDownSeen = lowestFaceDownSeen;
+      lastBestCompletedRunsReached = max(
+        lastBestCompletedRunsReached,
+        node.state.foundations.completedRuns,
+      );
+      lastDepthReached = maxDepthReached;
+      lastNodesExpanded = explored;
 
       if (_isWon(node.state)) {
+        lastNodesExpanded = explored;
+        lastDepthReached = maxDepthReached;
+        lastBestCompletedRunsReached = 8;
         return _SolveOutcome(
           result: _SolveResult.solvable,
           solutionSteps: _reconstructSteps(nodes, nodeIndex),
@@ -726,16 +1072,24 @@ class _TwoSuitSeedSolver {
         continue;
       }
 
-      final key = _stateKey(node.state);
-      final score = _stateScore(node.state);
+      final key = _stateHash(node.state);
       final prev = bestSeen[key];
-      if (prev != null && prev >= score) {
+      if (prev != null && prev.depth <= node.depth && prev.score >= score) {
         continue;
       }
-      bestSeen[key] = score;
+      bestSeen[key] = _SeenState(depth: node.depth, score: score);
 
-      final next = _expandAllWithSteps(node.state);
-      next.sort((a, b) => _stateScore(a.state).compareTo(_stateScore(b.state)));
+      final next = _expandAllWithSteps(
+        node.state,
+        lastMove: node.stepFromParent,
+      );
+      next.sort(
+        (a, b) => _transitionScore(
+          node.state,
+          b,
+          node.stepFromParent,
+        ).compareTo(_transitionScore(node.state, a, node.stepFromParent)),
+      );
       for (final transition in next) {
         nodes.add(
           _Node(
@@ -747,8 +1101,173 @@ class _TwoSuitSeedSolver {
         );
         stack.add(nodes.length - 1);
       }
+
+      final nowMs = watch.elapsedMilliseconds;
+      final shouldLogByNodes =
+          instrumentationEveryNodes > 0 &&
+          explored % instrumentationEveryNodes == 0;
+      final shouldLogByMs =
+          instrumentationEveryMs > 0 &&
+          nowMs - lastLogMs >= instrumentationEveryMs;
+      if (shouldLogByNodes || shouldLogByMs) {
+        final nps = nowMs > 0 ? (explored * 1000 ~/ nowMs) : 0;
+        stdout.writeln(
+          'SEARCH_METRICS mode=dfs nodesExpanded=$explored nodesPerSec=$nps '
+          'bestScoreSoFar=$bestScoreSoFar lowestFaceDownSeen=$lowestFaceDownSeen '
+          'deepestDepthReached=$maxDepthReached',
+        );
+        lastLogMs = nowMs;
+      }
     }
 
+    lastNodesExpanded = explored;
+    lastDepthReached = maxDepthReached;
+    return _SolveOutcome(
+      result: hitDepthCap ? _SolveResult.depthCap : _SolveResult.unsolved,
+      solutionSteps: const <SolutionStepDto>[],
+      elapsedMs: watch.elapsedMilliseconds,
+      nodesUsed: explored,
+      depthReached: maxDepthReached,
+    );
+  }
+
+  _SolveOutcome _searchWithBeam(GameState start, Stopwatch watch) {
+    final nodes = <_Node>[
+      _Node(state: start, depth: 0, parentIndex: null, stepFromParent: null),
+    ];
+    var frontier = <int>[0];
+    final bestSeen = <int, _SeenState>{};
+
+    var explored = 0;
+    var maxDepthReached = 0;
+    var hitDepthCap = false;
+    var bestScoreSoFar = _stateScore(start);
+    var lowestFaceDownSeen = _faceDownCount(start);
+    var lastLogMs = 0;
+
+    while (frontier.isNotEmpty) {
+      if (watch.elapsedMilliseconds >= perSeedMs) {
+        lastNodesExpanded = explored;
+        lastDepthReached = maxDepthReached;
+        return _SolveOutcome(
+          result: _SolveResult.timeout,
+          solutionSteps: const <SolutionStepDto>[],
+          elapsedMs: watch.elapsedMilliseconds,
+          nodesUsed: explored,
+          depthReached: maxDepthReached,
+        );
+      }
+      if (explored >= nodeCap) {
+        lastNodesExpanded = explored;
+        lastDepthReached = maxDepthReached;
+        return _SolveOutcome(
+          result: _SolveResult.nodeCap,
+          solutionSteps: const <SolutionStepDto>[],
+          elapsedMs: watch.elapsedMilliseconds,
+          nodesUsed: explored,
+          depthReached: maxDepthReached,
+        );
+      }
+
+      final nextFrontier = <int>[];
+      for (final nodeIndex in frontier) {
+        final node = nodes[nodeIndex];
+        explored++;
+        maxDepthReached = max(maxDepthReached, node.depth);
+        final score = _stateScore(node.state);
+        bestScoreSoFar = max(bestScoreSoFar, score);
+        lowestFaceDownSeen = min(
+          lowestFaceDownSeen,
+          _faceDownCount(node.state),
+        );
+        lastBestScoreSoFar = bestScoreSoFar;
+        lastLowestFaceDownSeen = lowestFaceDownSeen;
+        lastBestCompletedRunsReached = max(
+          lastBestCompletedRunsReached,
+          node.state.foundations.completedRuns,
+        );
+        lastDepthReached = maxDepthReached;
+        lastNodesExpanded = explored;
+
+        if (_isWon(node.state)) {
+          return _SolveOutcome(
+            result: _SolveResult.solvable,
+            solutionSteps: _reconstructSteps(nodes, nodeIndex),
+            elapsedMs: watch.elapsedMilliseconds,
+            nodesUsed: explored,
+            depthReached: maxDepthReached,
+          );
+        }
+        if (node.depth >= maxDepth) {
+          hitDepthCap = true;
+          continue;
+        }
+
+        final key = _stateHash(node.state);
+        final prev = bestSeen[key];
+        if (prev != null && prev.depth <= node.depth && prev.score >= score) {
+          continue;
+        }
+        bestSeen[key] = _SeenState(depth: node.depth, score: score);
+
+        final next = _expandAllWithSteps(
+          node.state,
+          lastMove: node.stepFromParent,
+        );
+        next.sort(
+          (a, b) => _transitionScore(
+            node.state,
+            b,
+            node.stepFromParent,
+          ).compareTo(_transitionScore(node.state, a, node.stepFromParent)),
+        );
+        for (final transition in next) {
+          nodes.add(
+            _Node(
+              state: transition.state,
+              depth: node.depth + 1,
+              parentIndex: nodeIndex,
+              stepFromParent: transition.step,
+            ),
+          );
+          nextFrontier.add(nodes.length - 1);
+        }
+
+        if (explored >= nodeCap) {
+          break;
+        }
+      }
+
+      nextFrontier.sort(
+        (a, b) =>
+            _stateScore(nodes[b].state).compareTo(_stateScore(nodes[a].state)),
+      );
+      if (nextFrontier.length > beamWidth) {
+        frontier = nextFrontier.sublist(0, beamWidth);
+      } else {
+        frontier = nextFrontier;
+      }
+
+      final nowMs = watch.elapsedMilliseconds;
+      final shouldLogByNodes =
+          instrumentationEveryNodes > 0 &&
+          explored % instrumentationEveryNodes == 0;
+      final shouldLogByMs =
+          instrumentationEveryMs > 0 &&
+          nowMs - lastLogMs >= instrumentationEveryMs;
+      if (shouldLogByNodes || shouldLogByMs) {
+        final nps = nowMs > 0 ? (explored * 1000 ~/ nowMs) : 0;
+        stdout.writeln(
+          'SEARCH_METRICS mode=beam nodesExpanded=$explored nodesPerSec=$nps '
+          'bestScoreSoFar=$bestScoreSoFar lowestFaceDownSeen=$lowestFaceDownSeen '
+          'deepestDepthReached=$maxDepthReached',
+        );
+        lastLogMs = nowMs;
+      }
+    }
+
+    lastNodesExpanded = explored;
+    lastDepthReached = maxDepthReached;
     return _SolveOutcome(
       result: hitDepthCap ? _SolveResult.depthCap : _SolveResult.unsolved,
       solutionSteps: const <SolutionStepDto>[],
@@ -805,11 +1324,18 @@ class _TwoSuitSeedSolver {
     );
   }
 
-  List<_Transition> _expandAllWithSteps(GameState state) {
-    final results = <_Transition>[];
-    results.addAll(_expandMovesWithSteps(state));
+  List<_Transition> _expandAllWithSteps(
+    GameState state, {
+    SolutionStepDto? lastMove,
+  }) {
+    final moveResults = _expandMovesWithSteps(state, lastMove: lastMove);
+    final hasProgressMove = moveResults.any(
+      (transition) => _isProgressTransition(state, transition.state),
+    );
 
-    if (_canDealFromStockClassic(state)) {
+    final results = <_Transition>[...moveResults];
+    final allowDeal = dealPolicy == _DealPolicy.always || !hasProgressMove;
+    if (allowDeal && _canDealFromStockClassic(state)) {
       final dealt = SpiderEngineCore.tryDealFromStock(
         state,
         unrestrictedDealRule: false,
@@ -825,7 +1351,10 @@ class _TwoSuitSeedSolver {
     return results;
   }
 
-  List<_Transition> _expandMovesWithSteps(GameState state) {
+  List<_Transition> _expandMovesWithSteps(
+    GameState state, {
+    SolutionStepDto? lastMove,
+  }) {
     final results = <_Transition>[];
 
     for (
@@ -854,6 +1383,16 @@ class _TwoSuitSeedSolver {
             continue;
           }
 
+          final moveStep = SolutionStepDto.move(
+            fromColumn: fromColumn,
+            toColumn: toColumn,
+            startIndex: startIndex,
+          );
+          final immediatelyBacktracks = _isImmediateBacktrack(
+            lastMove,
+            moveStep,
+          );
+
           final move = SpiderEngineCore.tryMoveStack(
             state,
             fromColumn: fromColumn,
@@ -865,21 +1404,29 @@ class _TwoSuitSeedSolver {
             continue;
           }
 
-          results.add(
-            _Transition(
-              state: move.state,
-              step: SolutionStepDto.move(
-                fromColumn: fromColumn,
-                toColumn: toColumn,
-                startIndex: startIndex,
-                movedLength: move.movedLength,
-              ),
-            ),
+          final transitionStep = SolutionStepDto.move(
+            fromColumn: fromColumn,
+            toColumn: toColumn,
+            startIndex: startIndex,
+            movedLength: move.movedLength,
           );
+          final progressMove = _isProgressTransition(state, move.state);
+          if (immediatelyBacktracks && !progressMove) {
+            continue;
+          }
+
+          results.add(_Transition(state: move.state, step: transitionStep));
         }
       }
     }
 
+    results.sort(
+      (a, b) => _transitionScore(
+        state,
+        b,
+        lastMove,
+      ).compareTo(_transitionScore(state, a, lastMove)),
+    );
     return results;
   }
 
@@ -890,51 +1437,123 @@ class _TwoSuitSeedSolver {
     );
   }
 
-  bool _isWon(GameState state) => state.foundations.completedRuns >= 1;
+  bool _isWon(GameState state) => state.foundations.completedRuns >= 8;
 
   int _stateScore(GameState state) {
-    final faceUpCount = state.tableau.columns
-        .expand((column) => column)
-        .where((card) => card.faceUp)
-        .length;
-    return (state.foundations.completedRuns * 10000) +
-        ((104 - state.stock.cards.length) * 20) +
-        faceUpCount;
+    final faceDown = _faceDownCount(state);
+    final runCards = _sameSuitRunCards(state);
+    final breaks = _sameSuitBreaks(state);
+    final emptyColumns = state.tableau.columns.where((c) => c.isEmpty).length;
+    return (state.foundations.completedRuns * 2000000) +
+        (runCards * 35) +
+        (emptyColumns * 250) -
+        (faceDown * 600) -
+        (breaks * 80) -
+        (state.stock.cards.length * 6);
   }
 
-  String _stateKey(GameState state) {
-    final sb = StringBuffer()
-      ..write(state.foundations.completedRuns)
-      ..write('|');
+  int _stateHash(GameState state) {
+    var hash = 1469598103934665603;
+    void mix(int value) {
+      hash ^= value & 0xffffffff;
+      hash = (hash * 1099511628211) & 0x7fffffffffffffff;
+    }
 
+    mix(state.foundations.completedRuns);
+    mix(state.stock.cards.length);
     for (final card in state.stock.cards) {
-      sb
-        ..write(card.rank.index)
-        ..write(',');
+      mix(card.id);
+      mix(card.faceUp ? 1 : 0);
     }
-    sb.write('|');
-
-    final columnKeys = <String>[];
     for (final column in state.tableau.columns) {
-      final col = StringBuffer();
+      mix(column.length);
       for (final card in column) {
-        col
-          ..write(card.rank.index)
-          ..write(card.faceUp ? 'u' : 'd')
-          ..write(',');
+        mix(card.id);
+        mix(card.faceUp ? 1 : 0);
       }
-      columnKeys.add(col.toString());
     }
 
-    columnKeys.sort();
-    for (final key in columnKeys) {
-      sb
-        ..write(key)
-        ..write(';');
-    }
-
-    return sb.toString();
+    return hash;
   }
+
+  int _faceDownCount(GameState state) {
+    return state.tableau.columns
+        .expand((column) => column)
+        .where((card) => !card.faceUp)
+        .length;
+  }
+
+  int _sameSuitRunCards(GameState state) {
+    var total = 0;
+    for (final column in state.tableau.columns) {
+      for (var i = 0; i + 1 < column.length; i++) {
+        final a = column[i];
+        final b = column[i + 1];
+        if (!a.faceUp || !b.faceUp) {
+          continue;
+        }
+        if (a.suit == b.suit && a.rank.index == b.rank.index + 1) {
+          total++;
+        }
+      }
+    }
+    return total;
+  }
+
+  int _sameSuitBreaks(GameState state) {
+    var breaks = 0;
+    for (final column in state.tableau.columns) {
+      for (var i = 0; i + 1 < column.length; i++) {
+        final a = column[i];
+        final b = column[i + 1];
+        if (!a.faceUp || !b.faceUp) {
+          continue;
+        }
+        final sameSuitDescending =
+            a.suit == b.suit && a.rank.index == b.rank.index + 1;
+        if (!sameSuitDescending) {
+          breaks++;
+        }
+      }
+    }
+    return breaks;
+  }
+
+  bool _isImmediateBacktrack(SolutionStepDto? last, SolutionStepDto next) {
+    if (last == null || !last.isMove || !next.isMove) {
+      return false;
+    }
+    return last.fromColumn == next.toColumn && last.toColumn == next.fromColumn;
+  }
+
+  bool _isProgressTransition(GameState before, GameState after) {
+    return after.foundations.completedRuns > before.foundations.completedRuns ||
+        _faceDownCount(after) < _faceDownCount(before) ||
+        _sameSuitRunCards(after) > _sameSuitRunCards(before);
+  }
+
+  int _transitionScore(
+    GameState before,
+    _Transition transition,
+    SolutionStepDto? lastMove,
+  ) {
+    final after = transition.state;
+    var score = _stateScore(after) - _stateScore(before);
+    if (_isProgressTransition(before, after)) {
+      score += 12000;
+    }
+    if (_isImmediateBacktrack(lastMove, transition.step)) {
+      score -= 5000;
+    }
+    return score;
+  }
+}
+
+class _SeenState {
+  const _SeenState({required this.depth, required this.score});
+
+  final int depth;
+  final int score;
 }
 
 class _Node {
