@@ -4,11 +4,13 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
+import '../../app/theme.dart';
 import '../../game/engine/game_engine.dart';
 import '../../game/model/card.dart';
 import '../../game/model/deal_source.dart';
 import '../../game/solvable/solvable_solution_step.dart';
 import '../../game/solvable/solution_step_replayer.dart';
+import '../play/widgets/felt_table_background.dart';
 import '../play/widgets/tableau_column_view.dart';
 import 'deal_choice.dart';
 
@@ -356,113 +358,118 @@ class _SolutionPreviewScreenState extends State<SolutionPreviewScreen> {
 
     return Scaffold(
       appBar: AppBar(title: Text(widget.args.title)),
-      body: Column(
+      body: Stack(
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '${widget.args.deal.modeLabel} ${widget.args.deal.guaranteeLabel} | '
-                  '${widget.args.deal.difficulty.label} | Seed ${widget.args.deal.seed}',
-                  style: Theme.of(context).textTheme.bodySmall,
+          const Positioned.fill(child: FeltTableBackground()),
+          Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '${widget.args.deal.modeLabel} ${widget.args.deal.guaranteeLabel} | '
+                      '${widget.args.deal.difficulty.label} | Seed ${widget.args.deal.seed}',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                    const SizedBox(height: 4),
+                    Text('Moves: ${state.moves}  Stock: $stockRowsRemaining rows'),
+                  ],
                 ),
-                const SizedBox(height: 4),
-                Text('Moves: ${state.moves}  Stock: $stockRowsRemaining rows'),
-              ],
-            ),
-          ),
-          Expanded(
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: List.generate(
-                  10,
-                  (i) => Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 4),
-                    child: TableauColumnView(
-                      columnIndex: i,
-                      cards: state.tableau.columns[i],
-                      tapEnabled: false,
-                      canDragFromIndex: (_) => false,
-                      onBuildDragPayload: (_) => DragRunPayload(
-                        fromColumn: i,
-                        startIndex: 0,
-                        cards: const <PlayingCard>[],
+              ),
+              Expanded(
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: List.generate(
+                      10,
+                      (i) => Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                        child: TableauColumnView(
+                          columnIndex: i,
+                          cards: state.tableau.columns[i],
+                          tapEnabled: false,
+                          canDragFromIndex: (_) => false,
+                          onBuildDragPayload: (_) => DragRunPayload(
+                            fromColumn: i,
+                            startIndex: 0,
+                            cards: const <PlayingCard>[],
+                          ),
+                          canAcceptDrop: (_) => false,
+                          onAcceptDrop: (_) {},
+                          onIllegalDrop: () {},
+                          onCardTap: (_) {},
+                          onColumnTap: () {},
+                          onDragStarted: (_) {},
+                          onDragCanceled: () {},
+                          onDragCompleted: () {},
+                        ),
                       ),
-                      canAcceptDrop: (_) => false,
-                      onAcceptDrop: (_) {},
-                      onIllegalDrop: () {},
-                      onCardTap: (_) {},
-                      onColumnTap: () {},
-                      onDragStarted: (_) {},
-                      onDragCanceled: () {},
-                      onDragCompleted: () {},
                     ),
                   ),
                 ),
               ),
-            ),
-          ),
-          Material(
-            elevation: 4,
-            color: Theme.of(context).colorScheme.surface,
-            child: SafeArea(
-              top: false,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      'Step $_stepIndex / ${widget.args.steps.length}',
-                      style: Theme.of(context).textTheme.titleSmall,
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      _stepDescription.isEmpty
-                          ? 'Waiting...'
-                          : _stepDescription,
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                    if (kDebugMode) ...[
-                      const SizedBox(height: 4),
-                      Text(
-                        'DEV dtoKind: ${_currentStepKind?.name ?? 'n/a'}',
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                    ],
-                    const SizedBox(height: 8),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
+              Material(
+                elevation: 4,
+                color: AppPalette.panelIvory.withValues(alpha: 0.96),
+                child: SafeArea(
+                  top: false,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        FilledButton.tonalIcon(
-                          onPressed: _toggleRun,
-                          icon: Icon(
-                            _isRunning ? Icons.pause : Icons.play_arrow,
+                        Text(
+                          'Step $_stepIndex / ${widget.args.steps.length}',
+                          style: Theme.of(context).textTheme.titleSmall,
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          _stepDescription.isEmpty
+                              ? 'Waiting...'
+                              : _stepDescription,
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                        if (kDebugMode) ...[
+                          const SizedBox(height: 4),
+                          Text(
+                            'DEV dtoKind: ${_currentStepKind?.name ?? 'n/a'}',
+                            style: Theme.of(context).textTheme.bodySmall,
                           ),
-                          label: Text(_isRunning ? 'Pause' : 'Play'),
-                        ),
-                        const SizedBox(width: 8),
-                        FilledButton.tonalIcon(
-                          onPressed: _isRunning ? null : _nextStep,
-                          icon: const Icon(Icons.skip_next),
-                          label: const Text('Next'),
-                        ),
-                        const SizedBox(width: 8),
-                        FilledButton.tonal(
-                          onPressed: _cancelAndExit,
-                          child: const Text('Cancel'),
+                        ],
+                        const SizedBox(height: 8),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            FilledButton.tonalIcon(
+                              onPressed: _toggleRun,
+                              icon: Icon(
+                                _isRunning ? Icons.pause : Icons.play_arrow,
+                              ),
+                              label: Text(_isRunning ? 'Pause' : 'Play'),
+                            ),
+                            const SizedBox(width: 8),
+                            FilledButton.tonalIcon(
+                              onPressed: _isRunning ? null : _nextStep,
+                              icon: const Icon(Icons.skip_next),
+                              label: const Text('Next'),
+                            ),
+                            const SizedBox(width: 8),
+                            FilledButton.tonal(
+                              onPressed: _cancelAndExit,
+                              child: const Text('Cancel'),
+                            ),
+                          ],
                         ),
                       ],
                     ),
-                  ],
+                  ),
                 ),
               ),
-            ),
+            ],
           ),
         ],
       ),

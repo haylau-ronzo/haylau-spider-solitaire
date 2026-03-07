@@ -60,6 +60,15 @@ jobs:
       - name: Flutter pub get
         run: flutter pub get
 
+      - name: Show run inputs
+        run: |
+          echo "suits=${{ inputs.suits }}"
+          echo "seed_start=${{ inputs.seed_start }}"
+          echo "scan_attempts=${{ inputs.scan_attempts }}"
+          echo "scan_ms=${{ inputs.scan_ms }}"
+          echo "top_k=${{ inputs.top_k }}"
+          echo "prove_ms=${{ inputs.prove_ms }}"
+
       - name: Generate 2-suit (auto)
         if: ${{ inputs.suits == 'two' }}
         run: |
@@ -112,6 +121,19 @@ jobs:
 
       - name: Test
         run: flutter test
+
+      - name: Upload generation artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: seedgen-${{ inputs.suits }}-${{ github.run_number }}
+          path: |
+            tool/tmp_candidate_seeds_2suit.txt
+            tool/tmp_candidate_seeds_4suit.txt
+            tool/tmp_generated_seeds_2suit.dart
+            tool/tmp_generated_seeds_4suit.dart
+            tool/tmp_generated_solutions_2suit.dart
+            tool/tmp_generated_solutions_4suit.dart
+          if-no-files-found: ignore
 
       - name: Commit and push verified pool updates
         env:

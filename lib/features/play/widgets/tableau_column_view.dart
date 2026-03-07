@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../../../app/theme.dart';
 import '../../../game/model/card.dart';
 import 'placeholder_card_view.dart';
 
@@ -97,14 +98,18 @@ class TableauColumnView extends StatelessWidget {
             builder: (context, candidateData, rejectedData) {
               final isCandidate = candidateData.isNotEmpty;
               final highlightColor = isCandidate || isValidTapTarget
-                  ? Theme.of(context).colorScheme.primary
-                  : Colors.transparent;
+                  ? AppPalette.accentGold.withValues(alpha: 0.9)
+                  : Colors.white.withValues(alpha: 0.12);
               return Container(
                 width: _cardWidth,
                 height: layout.stackHeight,
                 decoration: BoxDecoration(
-                  border: Border.all(color: highlightColor, width: 2),
-                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: highlightColor,
+                    width: isCandidate || isValidTapTarget ? 2.2 : 1.1,
+                  ),
+                  borderRadius: BorderRadius.circular(10),
+                  color: Colors.black.withValues(alpha: 0.05),
                 ),
                 child: Stack(
                   children: [
@@ -126,8 +131,10 @@ class TableauColumnView extends StatelessWidget {
                         child: Container(
                           margin: const EdgeInsets.all(8),
                           decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: Colors.black26),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                              color: AppPalette.panelIvory.withValues(alpha: 0.45),
+                            ),
                           ),
                         ),
                       ),
@@ -268,8 +275,8 @@ class TableauColumnView extends StatelessWidget {
     required bool isHinted,
     required Widget child,
   }) {
-    final selectedColor = Theme.of(context).colorScheme.secondary;
-    final hintColor = Theme.of(context).colorScheme.tertiary;
+    final selectedColor = AppPalette.accentGold;
+    final hintColor = AppPalette.accentBlue.withValues(alpha: 0.9);
     final borderColor = isSelected
         ? selectedColor
         : (isHinted ? hintColor : null);
@@ -278,8 +285,8 @@ class TableauColumnView extends StatelessWidget {
       duration: const Duration(milliseconds: 120),
       decoration: borderColor != null
           ? BoxDecoration(
-              border: Border.all(color: borderColor, width: 2),
-              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: borderColor, width: 2.1),
+              borderRadius: BorderRadius.circular(10),
             )
           : null,
       child: child,
@@ -397,8 +404,8 @@ class _EmptyPreviewSlot extends StatelessWidget {
       width: 62,
       height: 84,
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.black38),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppPalette.panelIvory.withValues(alpha: 0.6)),
       ),
     );
   }

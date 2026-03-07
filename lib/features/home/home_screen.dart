@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../../app/app_services.dart';
 import '../../app/routes.dart';
+import '../../app/theme.dart';
 import '../../game/model/deal_source.dart';
 import '../../game/model/difficulty.dart';
 import '../../game/persistence/save_model.dart';
@@ -264,7 +265,7 @@ class _HomeScreenState extends State<HomeScreen> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const Text('Daily Deal', style: TextStyle(fontSize: 18)),
+                Text('Daily Deal', style: Theme.of(context).textTheme.titleLarge),
                 const SizedBox(height: 4),
                 Text(
                   'Today seed: $todaySeed',
@@ -317,7 +318,7 @@ class _HomeScreenState extends State<HomeScreen> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const Text('Random Deal', style: TextStyle(fontSize: 18)),
+                Text('Random Deal', style: Theme.of(context).textTheme.titleLarge),
                 const SizedBox(height: 8),
                 if (_resumeRandom != null)
                   FilledButton(
@@ -345,11 +346,13 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                   ),
                 if (!hasGuaranteed)
-                  const Padding(
-                    padding: EdgeInsets.only(top: 6),
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6),
                     child: Text(
                       'No verified winnable deals available yet.',
-                      style: TextStyle(fontSize: 12, color: Colors.black54),
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
                     ),
                   ),
                 OutlinedButton(
@@ -399,17 +402,17 @@ class _HomeScreenState extends State<HomeScreen> {
                 ? Theme.of(context).textTheme.titleSmall
                 : Theme.of(context).textTheme.titleMedium)
             ?.copyWith(fontWeight: FontWeight.w700);
-    final spiderTint = Theme.of(
-      context,
-    ).colorScheme.onSurface.withValues(alpha: enabled ? 0.92 : 0.35);
+    final spiderTint = (enabled ? AppPalette.feltDark : AppPalette.panelBorder)
+        .withValues(alpha: enabled ? 0.92 : 0.45);
 
     return Opacity(
       opacity: enabled ? 1 : 0.65,
       child: Card(
         elevation: 0,
+        color: AppPalette.panelIvory.withValues(alpha: enabled ? 0.95 : 0.86),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(20),
-          side: BorderSide(color: Theme.of(context).dividerColor),
+          side: BorderSide(color: AppPalette.panelBorder.withValues(alpha: 0.8)),
         ),
         child: InkWell(
           borderRadius: BorderRadius.circular(20),
@@ -474,9 +477,9 @@ class _HomeScreenState extends State<HomeScreen> {
     final watermarkWidth = isPortrait ? 240.0 : 330.0;
     final watermarkTint = Theme.of(
       context,
-    ).colorScheme.onSurface.withValues(alpha: 0.42);
+    ).colorScheme.onSurface.withValues(alpha: 0.32);
     // Temporarily set to 0.25 when visually verifying, then restore.
-    const watermarkOpacity = 0.09;
+    const watermarkOpacity = 0.12;
 
     final dailyAvailable = _hasDailyPool();
 
@@ -537,6 +540,17 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       body: Stack(
         children: [
+          const Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [AppPalette.feltLight, AppPalette.feltMid, AppPalette.feltDark],
+                ),
+              ),
+            ),
+          ),
           Positioned.fill(
             child: IgnorePointer(
               child: Align(

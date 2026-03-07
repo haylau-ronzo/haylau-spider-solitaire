@@ -5,6 +5,7 @@ import 'package:flutter/scheduler.dart';
 
 import '../../app/app_services.dart';
 import '../../app/routes.dart';
+import '../../app/theme.dart';
 import '../../game/engine/game_engine.dart';
 import '../../game/model/card.dart';
 import '../../game/model/deal_source.dart';
@@ -15,6 +16,7 @@ import '../../game/solvable/solvable_seed_usage_tracker.dart';
 import '../../game/solvable/solvable_solution_step.dart';
 import '../../game/solvable/solution_step_replayer.dart';
 import '../../game/solvable/solvable_solutions_1suit_verified.dart';
+import 'widgets/felt_table_background.dart';
 import 'widgets/tableau_column_view.dart';
 
 class PlayScreenArgs {
@@ -661,6 +663,7 @@ class _PlayScreenState extends State<PlayScreen> {
       appBar: AppBar(title: const Text('Spider')),
       body: Stack(
         children: [
+          const Positioned.fill(child: FeltTableBackground()),
           IgnorePointer(
             ignoring: _solutionPreviewActive,
             child: Column(
@@ -834,10 +837,14 @@ class _PlayScreenState extends State<PlayScreen> {
                       vertical: 6,
                     ),
                     child: Material(
-                      color: Theme.of(
-                        context,
-                      ).colorScheme.surfaceContainerHighest,
+                      color: AppPalette.panelIvorySoft.withValues(alpha: 0.94),
                       borderRadius: BorderRadius.circular(14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        side: BorderSide(
+                          color: AppPalette.accentGold.withValues(alpha: 0.45),
+                        ),
+                      ),
                       child: Padding(
                         padding: const EdgeInsets.symmetric(
                           horizontal: 6,
@@ -914,7 +921,7 @@ class _PlayScreenState extends State<PlayScreen> {
               child: Material(
                 elevation: 6,
                 borderRadius: BorderRadius.circular(12),
-                color: Theme.of(context).colorScheme.surface,
+                color: AppPalette.panelIvory.withValues(alpha: 0.96),
                 child: Padding(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 12,
